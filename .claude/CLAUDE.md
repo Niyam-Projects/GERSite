@@ -24,7 +24,9 @@ Code style is enforced by Black (format on save in VSCode). Linting via flake8 a
 
 **openpois** models POI (Point of Interest) stability over time using historical OpenStreetMap data. The workflow is:
 
-1. **Download OSM history** (`src/openpois/io/osm_history.py`) — queries the Overpass API for element histories within a bounding box and date range, producing version/change tables
+1. **Download OSM history** — two options depending on scope:
+   - **US + Puerto Rico (default, `src/openpois/io/osm_history_pbf.py`)** — downloads Geofabrik full-history PBFs (`us-internal.osh.pbf` + `puerto-rico-internal.osh.pbf`), runs `osmium tags-filter --omit-referenced` then `osmium time-filter`, and streams the result through pyosmium into `osm_versions.parquet` + `osm_changes.parquet`. Requires an OSM-account OAuth cookie jar for Geofabrik's internal server. Entry point: `scripts/osm_data/download_history.py`.
+   - **City-scale fallback (`src/openpois/io/osm_history.py`)** — queries the Overpass API for element IDs in a bounding box, then fetches per-element histories from the OSM API. Seattle-scoped by default; Overpass cannot serve US-wide histories. Entry point: `scripts/osm_data/download.py`.
 2. **Format observations** (`src/openpois/osm/format_observations.py`) — converts raw OSM version histories into observation records (one row per version) with flags for tag changes and deletions
 3. **Model change rates** (`src/openpois/models/`) — fits an empirical Bayes model using PyTorch to estimate per-group POI change rates (λ) as a Poisson process
 4. **Visualize stability** (`src/openpois/osm/change_plots.py`) — plots how long POI tags remain unchanged
@@ -36,7 +38,8 @@ The **scripts/** directory contains end-to-end pipelines that call library funct
 - `EventRate` (`models/event_rate.py`) — wraps a constant or time-varying λ; computes change probabilities via integration
 - `ModelFitter` (`models/model_fitter.py`) — fits λ using PyTorch L-BFGS optimizer with optional priors; supports parameter draws for uncertainty
 - `pytorch_setup()` / `prepare_data_for_model()` (`models/setup.py`) — initializes torch (GPU/CPU) and prepares filtered, grouped observation data
-- `download_element_histories()` (`io/osm_history.py`) — main entry point for OSM history acquisition (Overpass, `download.osm.history_bbox` config key, Seattle-scoped — do NOT repurpose for nationwide use; Overpass cannot serve US-wide histories)
+- `download_osm_history()` (`io/osm_history_pbf.py`) — US+PR history pipeline entry: Geofabrik full-history PBFs → osmium tags-filter (`--omit-referenced`) → osmium time-filter → pyosmium stream → `osm_versions.parquet` + `osm_changes.parquet`. Requires `download.osm.history_cookie_file` to point at a Netscape-format cookie jar with valid Geofabrik OAuth cookies.
+- `download_element_histories()` (`io/osm_history.py`) — legacy city-scale entry point (Overpass, `download.osm.history_bbox` config key, Seattle-scoped; Overpass cannot serve US-wide histories)
 
 ### Configuration
 

@@ -33,8 +33,16 @@ download:
       ymax: 47.70
     pbf_url: "https://download.geofabrik.de/north-america/us-latest.osm.pbf"
     pr_pbf_url: "https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf"
+    # Full-history PBFs live on Geofabrik's OAuth-protected internal server.
+    # Any OSM account grants access; generate a Netscape-format cookie jar by
+    # logging in at https://osm-internal.download.geofabrik.de/ and exporting
+    # cookies, or by running Geofabrik's oauth_cookie_client.py.
+    history_pbf_url: "https://osm-internal.download.geofabrik.de/north-america/us-internal.osh.pbf"
+    pr_history_pbf_url: "https://osm-internal.download.geofabrik.de/north-america/us/puerto-rico-internal.osh.pbf"
+    history_cookie_file: "~/data/openpois/.creds/geofabrik_cookies.txt"
     overwrite_download: false
     overwrite_filter: false
+    overwrite_parse: false
     source_label: "osm"
     keep_all_keys: false
     chunk_size: 100_000
@@ -87,7 +95,7 @@ osm_data:
     - last_obs_timestamp
     - last_tag_timestamp
   apply_model:
-    model_stub: '20260319_discounted'
+    model_stub: '20260315'
 
 # Settings for exploratory/models/pytorch_simple.py
 osm_turnover_model:
@@ -106,8 +114,20 @@ directories:
     versioned: true
     path: ~/data/openpois/osm_data
     files:
-      osm_changes: osm_changes.csv
-      osm_versions: osm_versions.csv
+      # US+PR full-history pipeline (PBF-based)
+      osm_changes: osm_changes.parquet
+      osm_versions: osm_versions.parquet
+      raw_history_pbf: us-internal.osh.pbf
+      filtered_history_pbf: us-pois.osh.pbf
+      time_filtered_history_pbf: us-pois-timefilt.osh.pbf
+      raw_pr_history_pbf: puerto-rico-internal.osh.pbf
+      filtered_pr_history_pbf: puerto-rico-pois.osh.pbf
+      time_filtered_pr_history_pbf: puerto-rico-pois-timefilt.osh.pbf
+      us_versions: us_osm_versions.parquet
+      us_changes: us_osm_changes.parquet
+      pr_versions: pr_osm_versions.parquet
+      pr_changes: pr_osm_changes.parquet
+      # Legacy Overpass-based pipeline (still used by scripts/osm_data/download.py)
       osm_elements: osm_elements.csv
       osm_failed_elements: osm_failed_elements.csv
   model_output:
