@@ -68,7 +68,7 @@ OUTPUT_PATH = config.get_file_path("snapshot_osm", "snapshot")
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    gdf = download_osm_snapshot(
+    download_osm_snapshot(
         pbf_url = PBF_URL,
         raw_pbf_path = RAW_PBF,
         filtered_pbf_path = FILTERED_PBF,
@@ -87,4 +87,3 @@ if __name__ == "__main__":
         chunk_dir = CHUNK_DIR,
         verbose = VERBOSE,
     )
-    print(f"Saved {len(gdf):,} OSM POIs to {OUTPUT_PATH}")

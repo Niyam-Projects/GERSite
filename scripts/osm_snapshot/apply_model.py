@@ -27,12 +27,14 @@ Saves as a spatially-sorted GeoParquet (Hilbert curve order, zstd compression,
 from __future__ import annotations
 
 import argparse
+import gc
 import io
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 from config_versioned import Config
 
@@ -181,18 +183,36 @@ if __name__ == "__main__":
     gdf["model_group"] = pd.Categorical(model_group_arr)
 
     # -- Spatial sort for cloud-native S3 reads ---------------------------------
-    print("\nSorting by Hilbert curve index ...")
-    hilbert_order = gdf.hilbert_distance()
-    gdf = gdf.iloc[hilbert_order.argsort()].reset_index(drop = True)
+    # Two-pass approach avoids holding two GDF copies in memory at once:
+    #   1. compute sorted indices, report model breakdown, write unsorted
+    #      GeoParquet to a temp file, drop the GDF
+    #   2. read the temp back as a pa.Table, reorder via .take(), write final
+    print("\nComputing Hilbert curve order ...")
+    sorted_indices = gdf.hilbert_distance().to_numpy().argsort()
 
-    # -- Save -------------------------------------------------------------------
+    print("\nModel version breakdown:")
+    print(gdf["model_version"].value_counts().to_string())
+
     OUTPUT_PATH.parent.mkdir(parents = True, exist_ok = True)
-    print(f"Saving rated snapshot to {OUTPUT_PATH} ...")
-    gdf.to_parquet(
+    tmp_path = OUTPUT_PATH.with_suffix(OUTPUT_PATH.suffix + ".unsorted")
+    print(f"\nWriting unsorted snapshot to {tmp_path} ...")
+    gdf.to_parquet(tmp_path, compression = "zstd")
+    n_total = len(gdf)
+    del gdf
+    gc.collect()
+
+    print(f"Reordering via PyArrow and writing final output to {OUTPUT_PATH} ...")
+    table = pq.read_table(tmp_path)
+    sorted_table = table.take(pa.array(sorted_indices))
+    del table
+    gc.collect()
+    pq.write_table(
+        sorted_table,
         OUTPUT_PATH,
         compression = "zstd",
         row_group_size = 50_000,
     )
-    print(f"Done. Saved {len(gdf):,} POIs.")
-    print("\nModel version breakdown:")
-    print(gdf["model_version"].value_counts().to_string())
+    del sorted_table
+    gc.collect()
+    tmp_path.unlink()
+    print(f"Done. Saved {n_total:,} POIs.")
