@@ -182,8 +182,60 @@ def _flush_chunk(
     return chunk_path
 
 
-def parse_pbf_to_geodataframe(
+def _align_table_to_schema(
+    table: pa.Table, unified_schema: pa.Schema,
+) -> pa.Table:
+    """Return a copy of `table` conforming to `unified_schema`, filling missing
+    columns with nulls and casting type mismatches."""
+    cols = {}
+    for field in unified_schema:
+        idx = table.schema.get_field_index(field.name)
+        if idx == -1:
+            cols[field.name] = pa.nulls(len(table), type = field.type)
+        else:
+            col = table.column(field.name)
+            cols[field.name] = (
+                col.cast(field.type) if col.type != field.type else col
+            )
+    return pa.table(cols, schema = unified_schema)
+
+
+def _merge_parquets_streaming(
+    input_paths: list[Path], output_path: Path,
+) -> None:
+    """Concatenate multiple parquets into `output_path` via a PyArrow
+    streaming writer, unifying schemas across inputs. Peak memory is bounded
+    to one row group at a time. Preserves the metadata (including GeoParquet
+    "geo" key) from the first input."""
+    schemas = [pq.read_schema(p) for p in input_paths]
+    unified_schema = pa.unify_schemas(schemas).with_metadata(schemas[0].metadata)
+    with pq.ParquetWriter(output_path, unified_schema) as writer:
+        for p in input_paths:
+            pf = pq.ParquetFile(p)
+            for i in range(pf.num_row_groups):
+                table = pf.read_row_group(i)
+                writer.write_table(_align_table_to_schema(table, unified_schema))
+
+
+def _empty_poi_geoparquet(
+    out_path: Path, extract_keys: list[str] | None,
+) -> None:
+    """Write an empty POI GeoParquet with the standard column schema."""
+    extra_cols = list(extract_keys) if extract_keys is not None else []
+    empty = gpd.GeoDataFrame(
+        columns = [
+            "source", "osm_id", "osm_type", "name", "geometry",
+        ] + extra_cols,
+        geometry = "geometry",
+        crs = "EPSG:4326",
+    )
+    out_path.parent.mkdir(parents = True, exist_ok = True)
+    empty.to_parquet(out_path)
+
+
+def parse_pbf_to_parquet(
     pbf_path: Path,
+    out_path: Path,
     filter_keys: list[str] | None = None,
     extract_keys: list[str] | None = None,
     source_label: str = "osm",
@@ -191,49 +243,25 @@ def parse_pbf_to_geodataframe(
     max_area_nodes: int | None = None,
     chunk_dir: Path | None = None,
     verbose: bool = True,
-) -> gpd.GeoDataFrame:
+) -> Path:
     """
-    Parses a filtered PBF file with pyosmium and returns a GeoDataFrame.
+    Parses a filtered PBF file with pyosmium and writes the result as a
+    single GeoParquet file at `out_path`.
 
-    Uses ``osmium.FileProcessor`` with a disk-backed location index and
-    writes records in chunks to parquet files to avoid exhausting memory on
-    large extracts.
+    Memory-efficient alternative to parse_pbf_to_geodataframe: records are
+    flushed to per-chunk parquet files on disk, then merged directly to
+    out_path via a PyArrow streaming writer. A full GeoDataFrame is never
+    materialised in memory. Peak memory is one chunk's worth of records.
 
-    Processes nodes as Point geometries, closed ways as Polygon geometries
-    (open ways use their centroid), and multipolygon relations as
-    Polygon/MultiPolygon geometries. Node location resolution requires that
-    the PBF was NOT filtered with --omit-referenced so that referenced node
-    coordinates are present in the file.
-
-    Args:
-        pbf_path: Path to the (pre-filtered) PBF file.
-        filter_keys: Tag keys used to decide which elements to keep. An
-            element is accepted if it has at least one of these keys. If
-            None, all elements are accepted.
-        extract_keys: Tag keys to include as output columns (None for
-            absent values). If None, all tags on accepted elements are
-            extracted.
-        source_label: Value written to the 'source' column.
-        chunk_size: Number of POI records to accumulate before flushing to a
-            parquet file. Lower values reduce peak memory usage.
-        max_area_nodes: If set, relation-derived areas with more than this
-            many total coordinate nodes are skipped before any Shapely
-            geometry is built. Useful for excluding large multipolygons
-            (parks, admin boundaries) that can exhaust memory. None disables
-            the check.
-        chunk_dir: Directory under which a ``parse_chunks/`` subdirectory is
-            created to hold intermediate chunk files and the location index.
-            The subdirectory is deleted after a successful merge. If the
-            function exits early (error or interrupt), the subdirectory is
-            left on disk for inspection. Defaults to the parent directory of
-            pbf_path.
-        verbose: If True, log progress after each chunk is flushed.
+    Args: see parse_pbf_to_geodataframe. out_path is written with the same
+        schema that parse_pbf_to_geodataframe would produce in a GeoParquet
+        round-trip (columns: source, osm_id, osm_type, name, geometry, plus
+        any extract_keys tag columns).
 
     Returns:
-        GeoDataFrame with columns:
-            source, osm_id (int64), osm_type ('node'|'way'|'relation'),
-            tag columns, name, geometry. CRS is EPSG:4326.
+        out_path.
     """
+    out_path = Path(out_path)
     builder = POIRecordBuilder(
         source_label = source_label,
         filter_keys = filter_keys,
@@ -298,50 +326,70 @@ def parse_pbf_to_geodataframe(
 
         if total_records == 0:
             shutil.rmtree(work_dir)
-            extra_cols = list(extract_keys) if extract_keys is not None else []
-            return gpd.GeoDataFrame(
-                columns = [
-                    "source", "osm_id", "osm_type", "name", "geometry"
-                ] + extra_cols,
-                geometry = "geometry",
-                crs = "EPSG:4326",
-            )
+            _empty_poi_geoparquet(out_path, extract_keys)
+            return out_path
 
         existing_chunks = sorted(work_dir.glob("chunk_*.parquet"))
 
-    # Merge chunk files via PyArrow (geometry stays as WKB bytes — no
-    # Shapely deserialization cost). Peak memory is one chunk at a time.
-    # Different chunks may have different tag columns (OSM tags are free-form),
-    # so we first collect all schemas via cheap metadata reads, unify them, then
-    # align each chunk to the unified schema (adding missing columns as nulls
-    # and casting type mismatches such as null→large_string).
-    chunk_schemas = [pq.read_schema(f) for f in existing_chunks]
-    unified_schema = pa.unify_schemas(chunk_schemas)
-    # Preserve GeoParquet metadata from the first chunk
-    unified_schema = unified_schema.with_metadata(chunk_schemas[0].metadata)
-    merged_path = work_dir / "merged.parquet"
-    with pq.ParquetWriter(merged_path, unified_schema) as writer:
-        for f in existing_chunks:
-            table = pq.read_table(f)
-            cols = {}
-            for field in unified_schema:
-                idx = table.schema.get_field_index(field.name)
-                if idx == -1:
-                    cols[field.name] = pa.nulls(len(table), type = field.type)
-                else:
-                    col = table.column(field.name)
-                    cols[field.name] = (
-                        col.cast(field.type) if col.type != field.type else col
-                    )
-            writer.write_table(pa.table(cols, schema = unified_schema))
-    gdf = gpd.read_parquet(merged_path)
+    # Merge chunk files via PyArrow, writing directly to out_path. Different
+    # chunks may have different tag columns (OSM tags are free-form), so we
+    # unify schemas first then align each chunk's row groups.
+    out_path.parent.mkdir(parents = True, exist_ok = True)
+    _merge_parquets_streaming(existing_chunks, out_path)
 
-    # Clean up only after a successful merge and read
+    # Clean up only after a successful merge
     shutil.rmtree(work_dir)
 
     if verbose:
+        n = pq.read_metadata(out_path).num_rows
+        print(f"Parsed {n:,} OSM POIs -> {out_path}")
+    return out_path
+
+
+def parse_pbf_to_geodataframe(
+    pbf_path: Path,
+    filter_keys: list[str] | None = None,
+    extract_keys: list[str] | None = None,
+    source_label: str = "osm",
+    chunk_size: int = 500_000,
+    max_area_nodes: int | None = None,
+    chunk_dir: Path | None = None,
+    verbose: bool = True,
+) -> gpd.GeoDataFrame:
+    """
+    Parses a filtered PBF file with pyosmium and returns a GeoDataFrame.
+
+    Thin wrapper around parse_pbf_to_parquet that loads the written parquet
+    into a GeoDataFrame. For very large extracts (e.g. a full US PBF), prefer
+    parse_pbf_to_parquet and consume the parquet with PyArrow streaming to
+    avoid holding all records in memory.
+
+    See parse_pbf_to_parquet for parameter documentation.
+
+    Returns:
+        GeoDataFrame with columns:
+            source, osm_id (int64), osm_type ('node'|'way'|'relation'),
+            tag columns, name, geometry. CRS is EPSG:4326.
+    """
+    with tempfile.TemporaryDirectory(
+        dir = Path(pbf_path).parent
+    ) as tmp:
+        tmp_parquet = Path(tmp) / "parsed.parquet"
+        parse_pbf_to_parquet(
+            pbf_path = pbf_path,
+            out_path = tmp_parquet,
+            filter_keys = filter_keys,
+            extract_keys = extract_keys,
+            source_label = source_label,
+            chunk_size = chunk_size,
+            max_area_nodes = max_area_nodes,
+            chunk_dir = chunk_dir,
+            verbose = verbose,
+        )
+        gdf = gpd.read_parquet(tmp_parquet)
+    if verbose:
         print(
-            f"Parsed {len(gdf):,} OSM POIs"
+            f"Loaded {len(gdf):,} OSM POIs"
             f" ({gdf['osm_type'].value_counts().to_dict()})"
         )
     return gdf
@@ -352,10 +400,11 @@ def parse_pbf_to_geodataframe(
 # -----------------------------------------------------------------------------
 
 
-def _download_filter_parse(
+def _download_filter_parse_to_parquet(
     pbf_url: str,
     raw_pbf_path: Path,
     filtered_pbf_path: Path,
+    parsed_parquet_path: Path,
     filter_keys: list[str],
     extract_keys: list[str] | None,
     overwrite_download: bool,
@@ -365,8 +414,9 @@ def _download_filter_parse(
     max_area_nodes: int | None,
     chunk_dir: Path | None,
     verbose: bool,
-) -> gpd.GeoDataFrame:
-    """Download a single Geofabrik PBF, filter it, and parse it to a GDF."""
+) -> Path:
+    """Download a single Geofabrik PBF, filter it, and parse it to a parquet
+    file at `parsed_parquet_path` without materialising a GeoDataFrame."""
     download_pbf(
         url = pbf_url,
         output_path = raw_pbf_path,
@@ -378,8 +428,9 @@ def _download_filter_parse(
         osm_keys = filter_keys,
         overwrite = overwrite_filter,
     )
-    return parse_pbf_to_geodataframe(
+    return parse_pbf_to_parquet(
         pbf_path = filtered_pbf_path,
+        out_path = parsed_parquet_path,
         filter_keys = filter_keys,
         extract_keys = extract_keys,
         source_label = source_label,
@@ -408,7 +459,7 @@ def download_osm_snapshot(
     max_area_nodes: int | None = None,
     chunk_dir: Path | None = None,
     verbose: bool = True,
-) -> gpd.GeoDataFrame:
+) -> Path:
     """
     End-to-end orchestrator: download both the US-mainland and Puerto Rico
     Geofabrik PBFs, filter each to POIs, parse each, concat, and save as
@@ -459,16 +510,23 @@ def download_osm_snapshot(
         verbose: If True, log progress after each chunk is flushed.
 
     Returns:
-        GeoDataFrame written to output_path.
+        Path to the written GeoParquet file (same as output_path).
     """
     output_path = Path(output_path)
     resolved_extract_keys = None if keep_all_keys else extract_keys
 
+    # Intermediate per-country parsed parquets, deleted after the final concat.
+    # Written next to output_path so they live on the same filesystem (cheap
+    # rename) and away from the PBF `parse_chunks/` work dirs.
+    us_parsed_path = output_path.with_name(output_path.stem + "._us.parquet")
+    pr_parsed_path = output_path.with_name(output_path.stem + "._pr.parquet")
+
     print("Processing US-mainland extract...")
-    us_gdf = _download_filter_parse(
+    _download_filter_parse_to_parquet(
         pbf_url = pbf_url,
         raw_pbf_path = raw_pbf_path,
         filtered_pbf_path = filtered_pbf_path,
+        parsed_parquet_path = us_parsed_path,
         filter_keys = filter_keys,
         extract_keys = resolved_extract_keys,
         overwrite_download = overwrite_download,
@@ -481,10 +539,11 @@ def download_osm_snapshot(
     )
 
     print("Processing Puerto Rico extract...")
-    pr_gdf = _download_filter_parse(
+    _download_filter_parse_to_parquet(
         pbf_url = pr_pbf_url,
         raw_pbf_path = raw_pr_pbf_path,
         filtered_pbf_path = filtered_pr_pbf_path,
+        parsed_parquet_path = pr_parsed_path,
         filter_keys = filter_keys,
         extract_keys = resolved_extract_keys,
         overwrite_download = overwrite_download,
@@ -496,11 +555,15 @@ def download_osm_snapshot(
         verbose = verbose,
     )
 
-    print(f"Concatenating US ({len(us_gdf):,}) + PR ({len(pr_gdf):,}) POIs...")
-    gdf = pd.concat([us_gdf, pr_gdf], ignore_index = True)
-    gdf = gpd.GeoDataFrame(gdf, geometry = "geometry", crs = "EPSG:4326")
-
+    n_us = pq.read_metadata(us_parsed_path).num_rows
+    n_pr = pq.read_metadata(pr_parsed_path).num_rows
+    print(f"Concatenating US ({n_us:,}) + PR ({n_pr:,}) POIs...")
     output_path.parent.mkdir(parents = True, exist_ok = True)
-    gdf.to_parquet(output_path)
-    print(f"Saved OSM snapshot ({len(gdf):,} POIs) to {output_path}")
-    return gdf
+    _merge_parquets_streaming([us_parsed_path, pr_parsed_path], output_path)
+
+    us_parsed_path.unlink()
+    pr_parsed_path.unlink()
+
+    n_total = pq.read_metadata(output_path).num_rows
+    print(f"Saved OSM snapshot ({n_total:,} POIs) to {output_path}")
+    return output_path

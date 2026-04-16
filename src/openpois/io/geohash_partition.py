@@ -5,6 +5,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pygeohash
+import shapely
 
 
 def add_geohash_columns(
@@ -17,19 +18,31 @@ def add_geohash_columns(
     Rows with null or empty geometries are dropped before computing hashes.
     Both columns are derived from the geometry centroid, so Points, Polygons,
     and MultiPolygons are all handled uniformly.
+
+    Geohash is a prefix code, so the partition hash equals the first
+    ``precision_partition`` characters of the sort hash. We encode once at
+    the higher precision and derive the shorter prefix by string slicing,
+    avoiding a second pass over N Shapely Points.
     """
-    gdf = gdf[~gdf.geometry.is_empty & gdf.geometry.notna()].copy()
+    mask = ~gdf.geometry.is_empty & gdf.geometry.notna()
+    if not mask.all():
+        gdf = gdf[mask].reset_index(drop = True)
+
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "Geometry is in a geographic CRS", UserWarning)
-        centroids = gdf.geometry.centroid
-    gdf["geohash_prefix"] = [
-        pygeohash.encode(g.y, g.x, precision = precision_partition)
-        for g in centroids
+        warnings.filterwarnings(
+            "ignore", "Geometry is in a geographic CRS", UserWarning
+        )
+        centroids = shapely.centroid(gdf.geometry.to_numpy())
+    lats = shapely.get_y(centroids)
+    lons = shapely.get_x(centroids)
+    del centroids
+
+    sort_hashes = [
+        pygeohash.encode(float(lat), float(lon), precision = precision_sort)
+        for lat, lon in zip(lats, lons)
     ]
-    gdf["geohash_sort"] = [
-        pygeohash.encode(g.y, g.x, precision = precision_sort)
-        for g in centroids
-    ]
+    gdf["geohash_sort"] = sort_hashes
+    gdf["geohash_prefix"] = [h[:precision_partition] for h in sort_hashes]
     return gdf
 
 
