@@ -1,27 +1,38 @@
 # Versioned directories (used with config.get_dir_path())
 versions:
-  osm_data: "20260313"
-  model_output: "20260315_constant"
-  snapshot_osm: "20260313"
-  snapshot_overture: "20260313"
-  snapshot_foursquare: "20260313"
-  aws: "20260318"
-  conflation: "20260318"
+  osm_data: "20260416"
+  model_output: "20260315"
+  snapshot_osm: "20260416"
+  snapshot_overture: "20260416"
+  snapshot_foursquare: "20260416"
+  aws: "20260416"
+  conflation: "20260416"
 
 # Settings for downloading data
 download:
   general:
     timeout: 1_000
-    bbox:
-      xmin: -125.0
-      ymin: 24.5
-      xmax: -66.9
-      ymax: 49.4
+    # Census 1:20M cartographic state boundary file; includes 50 states + DC
+    # + PR. Used by all three snapshot downloads to restrict POIs to the US
+    # plus Puerto Rico. The coastline buffer expands the dissolved polygon
+    # outward by N metres so near-shore POIs are retained; internal state
+    # borders disappear on dissolve so the buffer only affects the coast.
+    boundary:
+      source_url: "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_state_20m.zip"
+      coastline_buffer_m: 100
   osm:
     start_date: 2016-01-01
     end_date: 2025-12-31
     date_interval_days: 7
+    # Seattle-area bbox used only by the Overpass-based historical download.
+    # Overpass cannot serve US-wide histories; keep this scoped to a city.
+    history_bbox:
+      xmin: -122.45
+      ymin: 47.50
+      xmax: -122.25
+      ymax: 47.70
     pbf_url: "https://download.geofabrik.de/north-america/us-latest.osm.pbf"
+    pr_pbf_url: "https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf"
     overwrite_download: false
     overwrite_filter: false
     source_label: "osm"
@@ -76,7 +87,7 @@ osm_data:
     - last_obs_timestamp
     - last_tag_timestamp
   apply_model:
-    model_stub: '20260315'
+    model_stub: '20260319_discounted'
 
 # Settings for exploratory/models/pytorch_simple.py
 osm_turnover_model:
@@ -119,10 +130,15 @@ directories:
     files:
       raw_pbf: us-latest.osm.pbf
       filtered_pbf: us-pois.osm.pbf
+      raw_pr_pbf: puerto-rico-latest.osm.pbf
+      filtered_pr_pbf: puerto-rico-pois.osm.pbf
       snapshot: osm_snapshot.parquet
       rated_snapshot: osm_snapshot_rated.parquet
       partitioned: osm_snapshot_partitioned
       pmtiles: osm_snapshot.pmtiles
+  boundary:
+    versioned: false
+    path: ~/data/openpois/boundary
   snapshot_overture:
     versioned: true
     path: ~/data/openpois/snapshots/overture

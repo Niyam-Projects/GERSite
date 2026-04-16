@@ -49,7 +49,6 @@ TAG_KEY = config.get("osm_data", "tag_key")
 END_DATE = pd.Timestamp(config.get("download", "osm", "end_date"), tz='UTC')
 MODEL_BASE = config.get_dir_path("model_output").parent
 MODEL_STUB = config.get("osm_data", "apply_model", "model_stub")
-ADJ_FACTOR = 1.0
 
 max_days = 365 * 10
 VIZ_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,7 +81,7 @@ def fig_save(
         **kwargs
     )
 
-def get_preds_dict(model_stub: str | None, adj_factor: float = 1.0) -> dict[str, pd.DataFrame]:
+def get_preds_dict(model_stub: str | None) -> dict[str, pd.DataFrame]:
     """
     Load model predictions from the model output directory.
     """
@@ -98,9 +97,9 @@ def get_preds_dict(model_stub: str | None, adj_factor: float = 1.0) -> dict[str,
             return None
         return pd.read_csv(preds_fp).assign(
             year = pd.col('t2'),
-            conf_mean = (1.0 - pd.col('p_mean')) * adj_factor,
-            conf_lower = (1.0 - pd.col('p_upper')) * adj_factor,
-            conf_upper = (1.0 - pd.col('p_lower')) * adj_factor,
+            conf_mean = (1.0 - pd.col('p_mean')),
+            conf_lower = (1.0 - pd.col('p_upper')),
+            conf_upper = (1.0 - pd.col('p_lower')),
         )
     preds = dict()
     preds["constant"] = get_preds_df(model_stub)
@@ -115,7 +114,7 @@ def get_preds_dict(model_stub: str | None, adj_factor: float = 1.0) -> dict[str,
 
 if __name__ == "__main__":
     # Read model predictions
-    preds = get_preds_dict(MODEL_STUB, adj_factor = ADJ_FACTOR)
+    preds = get_preds_dict(MODEL_STUB)
     # Read observations
     # Drop the first observation for each POI (when the POI was first added) - the last
     #   observation timestamp will be missing for these rows

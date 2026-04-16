@@ -113,8 +113,13 @@ class ModelFitter:
             Tensor of change probabilities clamped to (EPSILON, 1 - EPSILON).
         """
         change_rates = self.calculate_change_rates(params = params, **kwargs)
+        discount = torch.tensor(
+            0.05,
+            device = change_rates.device,
+            dtype = change_rates.dtype
+        )
         probs = (
-            (1.0 - torch.exp(-1.0 * change_rates))
+            (1.0 - (1 - discount) * torch.exp(-1.0 * change_rates))
             .squeeze(-1)
             .clamp(min=self.EPSILON, max=1.0 - self.EPSILON)
         )

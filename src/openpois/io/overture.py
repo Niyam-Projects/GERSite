@@ -4,15 +4,26 @@
 #   -------------------------------------------------------------
 
 """
-This module downloads a current/latest Overture Maps Places snapshot for a
-given bounding box and set of taxonomy categories.
+This module downloads a current/latest Overture Maps Places snapshot for the
+US + Puerto Rico, filtered to a set of taxonomy categories.
 
 It is broken into the following functions:
 
 - get_latest_release_date: Finds the most recent Overture release by listing S3.
 - build_overture_s3_path: Constructs the S3 glob path for a given release.
-- download_overture_snapshot: Queries S3 via DuckDB, filters by bbox and
-    taxonomy, and writes a GeoParquet file.
+- download_overture_snapshot: Queries S3 via DuckDB with a coarse bbox
+    prefilter, decodes the result into a GeoDataFrame, applies an exact
+    polygon filter against the US+PR boundary, and writes a GeoParquet file.
+
+Spatial filter strategy (two-stage):
+
+1. DuckDB ``WHERE`` uses predicate pushdown on Overture's ``bbox`` struct
+   column, OR-ing across one or more coarse bboxes. Multiple bboxes are
+   required to capture the Alaskan Near Islands, which sit at positive
+   longitudes (+172 E) while the rest of the US sits at negative longitudes.
+2. After the GeoDataFrame is built in memory, a spatial-join ``within``
+   check against the dissolved US+PR polygon drops Canadian and Mexican
+   border slivers and anything else outside the actual US+PR footprint.
 
 Data source: s3://overturemaps-us-west-2/release/ (public, no auth required).
 
@@ -105,10 +116,25 @@ def build_overture_s3_path(
 # -----------------------------------------------------------------------------
 
 
+def _build_bbox_predicate(coarse_bboxes: list[dict]) -> str:
+    """Return a SQL fragment ORing Overture bbox-struct predicates together."""
+    if not coarse_bboxes:
+        raise ValueError("coarse_bboxes must contain at least one bbox.")
+    terms = [
+        (
+            f"(bbox.xmin >= {b['xmin']} AND bbox.xmax <= {b['xmax']}"
+            f" AND bbox.ymin >= {b['ymin']} AND bbox.ymax <= {b['ymax']})"
+        )
+        for b in coarse_bboxes
+    ]
+    return "(" + " OR ".join(terms) + ")"
+
+
 def download_overture_snapshot(
     output_path: Path,
     taxonomy_l0_categories: list[str],
-    bbox: dict,
+    boundary_gdf: gpd.GeoDataFrame,
+    coarse_bboxes: list[dict],
     bucket: str,
     s3_region: str,
     release_date: str | None = None,
@@ -118,12 +144,17 @@ def download_overture_snapshot(
     Downloads filtered Overture Maps Places data and saves it as GeoParquet.
 
     Uses DuckDB with the httpfs and spatial extensions to query the public
-    Overture Maps S3 bucket directly. Applies predicate pushdown via the
-    bbox struct columns and filters by taxonomy L0 category.
+    Overture Maps S3 bucket directly. Applies a two-stage spatial filter:
+
+    1. Predicate pushdown on Overture's ``bbox`` struct using one or more
+       coarse bboxes (OR-ed). Multiple bboxes allow callers to capture the
+       Alaskan Near Islands (+172 E) without scanning the whole planet.
+    2. A Python-side ``within`` check against ``boundary_gdf`` to keep only
+       points inside the exact US+PR polygon.
 
     The geometry column in the source data is WKB-encoded. This function
     decodes it into a proper GeoPandas geometry column and sets the CRS to
-    EPSG:4326 before saving.
+    EPSG:4326 before applying the polygon filter and saving.
 
     Args:
         output_path: Path to write the output GeoParquet file.
@@ -135,8 +166,12 @@ def download_overture_snapshot(
             'community_and_government', 'cultural_and_historic', 'lodging',
             'geographic_entities'.
             See: https://docs.overturemaps.org/guides/places/taxonomy/
-        bbox: Bounding box dict with keys 'xmin', 'ymin', 'xmax', 'ymax'
-            in WGS84 degrees.
+        boundary_gdf: Single-row GeoDataFrame in EPSG:4326 containing the
+            dissolved, buffered US+PR polygon. Used as the exact spatial
+            filter; obtain it from ``openpois.io.boundary``.
+        coarse_bboxes: List of bbox dicts (keys ``xmin, ymin, xmax, ymax``)
+            used as the DuckDB predicate-pushdown prefilter. Typically
+            obtained from ``openpois.io.boundary.us_pr_bboxes``.
         release_date: Overture release identifier (e.g., '2026-02-18.0').
             If None, the latest release is fetched automatically.
         bucket: S3 bucket name hosting Overture releases.
@@ -163,6 +198,7 @@ def download_overture_snapshot(
     s3_path = build_overture_s3_path(release_date, bucket = bucket)
 
     categories_sql = ", ".join(f"'{c}'" for c in taxonomy_l0_categories)
+    bbox_predicate = _build_bbox_predicate(coarse_bboxes)
 
     query = f"""
         SELECT
@@ -179,10 +215,7 @@ def download_overture_snapshot(
             ST_Y(geometry) AS latitude
         FROM read_parquet('{s3_path}', hive_partitioning=1)
         WHERE
-            bbox.xmin >= {bbox['xmin']}
-            AND bbox.xmax <= {bbox['xmax']}
-            AND bbox.ymin >= {bbox['ymin']}
-            AND bbox.ymax <= {bbox['ymax']}
+            {bbox_predicate}
             AND taxonomy.hierarchy[1] IN ({categories_sql})
     """
 
@@ -200,6 +233,17 @@ def download_overture_snapshot(
         df.drop(columns = ["longitude", "latitude"]),
         geometry = gpd.points_from_xy(df["longitude"], df["latitude"]),
         crs = "EPSG:4326",
+    )
+
+    print("Applying exact US+PR polygon filter...")
+    n_before = len(gdf)
+    boundary_one_col = boundary_gdf[["geometry"]].to_crs(gdf.crs)
+    gdf = gpd.sjoin(
+        gdf, boundary_one_col, predicate = "within", how = "inner"
+    ).drop(columns = "index_right").reset_index(drop = True)
+    print(
+        f"Polygon filter kept {len(gdf):,} of {n_before:,} "
+        f"({n_before - len(gdf):,} dropped outside US+PR)."
     )
 
     gdf.to_parquet(output_path)

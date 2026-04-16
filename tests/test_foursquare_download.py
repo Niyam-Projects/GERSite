@@ -14,8 +14,10 @@ from __future__ import annotations
 import datetime
 from unittest.mock import MagicMock, patch
 
+import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import box
 
 from openpois.io.foursquare import (
     get_fsq_catalog,
@@ -32,6 +34,14 @@ from openpois.io.foursquare import (
 def _make_catalog_mock() -> MagicMock:
     """Return a mock RestCatalog."""
     return MagicMock()
+
+
+def _boundary_covering_mock_places() -> gpd.GeoDataFrame:
+    """Rectangle covering the mock-places longitudes/latitudes used below."""
+    return gpd.GeoDataFrame(
+        geometry = [box(-125.0, 35.0, -115.0, 45.0)],
+        crs = "EPSG:4326",
+    )
 
 
 def _make_table_mock(scan_df: pd.DataFrame) -> MagicMock:
@@ -284,6 +294,7 @@ class TestLoadFsqUsPlaces:
             catalog_namespace="ns",
             places_table="places",
             categories_table="categories",
+            boundary_gdf=_boundary_covering_mock_places(),
         )
 
         # Sports and Recreation row should be dropped
@@ -310,6 +321,7 @@ class TestLoadFsqUsPlaces:
             catalog_namespace="ns",
             places_table="places",
             categories_table="categories",
+            boundary_gdf=_boundary_covering_mock_places(),
         )
 
         grill_row = gdf.loc[gdf["name"] == "The Grill"].iloc[0]
@@ -337,6 +349,7 @@ class TestLoadFsqUsPlaces:
             catalog_namespace="ns",
             places_table="places",
             categories_table="categories",
+            boundary_gdf=_boundary_covering_mock_places(),
         )
 
         assert gdf.crs.to_epsg() == 4326
@@ -363,6 +376,7 @@ class TestLoadFsqUsPlaces:
             catalog_namespace="ns",
             places_table="places",
             categories_table="categories",
+            boundary_gdf=_boundary_covering_mock_places(),
         )
 
         assert len(gdf) == 0
@@ -387,6 +401,7 @@ class TestLoadFsqUsPlaces:
             catalog_namespace="ns",
             places_table="places",
             categories_table="categories",
+            boundary_gdf=_boundary_covering_mock_places(),
         )
 
         assert (gdf["release_date"] == "2026-02-12").all()

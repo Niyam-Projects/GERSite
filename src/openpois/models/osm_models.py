@@ -68,6 +68,10 @@ class ModelFactory(ABC):
         """Build model components (model_fun, event_rate_type, parameters, etc.)."""
         pass
 
+    def discounting(self):
+        """Add a discounting factor to any model. Default no discounting."""
+        return torch.tensor(1.0)
+
     def assign_targets(self):
         """Assign target tensor and time tensors from raw_data."""
         self.target = torch.tensor(self.raw_data['changed'].values)
@@ -247,6 +251,12 @@ class RandomByTypeModel(ModelFactory):
             'group_id': [np.nan, np.nan] + list(range(n_groups))
         })
 
+
+## Models with an initial discounting component ----------------------------------------->
+
+
+
+## Model selectors ---------------------------------------------------------------------->
 
 # Model selector dictionary for importing and selection by model name
 MODEL_REGISTRY = {

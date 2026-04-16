@@ -6,7 +6,7 @@ a series of snapshot dates, then fetches the full version history of each
 element via the OSM API.
 
 Config keys used (config.yaml):
-    download.general.bbox            — WGS-84 bbox [xmin, ymin, xmax, ymax]
+    download.osm.history_bbox        — WGS-84 bbox [xmin, ymin, xmax, ymax]
     download.general.timeout         — request timeout in seconds
     download.osm.start_date          — earliest snapshot date (min: 2012-09-13)
     download.osm.end_date            — latest snapshot date
@@ -35,7 +35,7 @@ from openpois.io.osm_history import (
 config = Config("~/repos/openpois/config.yaml")
 
 TIMEOUT = config.get("download", "general", "timeout")
-BBOX = config.get("download", "general", "bbox")
+BBOX = config.get("download", "osm", "history_bbox")
 # Earliest option is September 13, 2012
 START_DATE = datetime.datetime.combine(
     config.get("download", "osm", "start_date"), datetime.time.min

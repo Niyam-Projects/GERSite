@@ -17,12 +17,23 @@ from unittest.mock import MagicMock, patch
 import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import box
 
 from openpois.io.overture import (
     build_overture_s3_path,
     download_overture_snapshot,
     get_latest_release_date,
 )
+
+
+def _rect_boundary_gdf(
+    xmin: float, ymin: float, xmax: float, ymax: float
+) -> gpd.GeoDataFrame:
+    """Return a single-row GeoDataFrame containing a WGS-84 rectangle."""
+    return gpd.GeoDataFrame(
+        geometry = [box(xmin, ymin, xmax, ymax)],
+        crs = "EPSG:4326",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +168,10 @@ class TestDownloadOvertureSnapshot:
     def test_calls_duckdb_with_s3_path_and_bbox(self, tmp_path):
         """DuckDB query should reference the S3 path and bbox filter values."""
         output = tmp_path / "overture.parquet"
-        bbox = {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+        coarse_bboxes = [
+            {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+        ]
+        boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0)
         df = pd.DataFrame(
             {
                 "source": ["overture"],
@@ -181,7 +195,8 @@ class TestDownloadOvertureSnapshot:
             gdf = download_overture_snapshot(
                 output_path=output,
                 taxonomy_l0_categories=["eat_and_drink"],
-                bbox=bbox,
+                boundary_gdf=boundary_gdf,
+                coarse_bboxes=coarse_bboxes,
                 bucket="overturemaps-us-west-2",
                 s3_region="us-west-2",
                 release_date="2026-02-18.0",
@@ -194,7 +209,7 @@ class TestDownloadOvertureSnapshot:
         final_query = sql_calls[-1]  # last call is the data query
         assert "read_parquet" in final_query
         assert "2026-02-18.0" in final_query
-        assert str(bbox["xmin"]) in final_query
+        assert str(coarse_bboxes[0]["xmin"]) in final_query
         assert "eat_and_drink" in final_query
 
         assert len(gdf) == 1
@@ -233,7 +248,10 @@ class TestDownloadOvertureSnapshot:
             download_overture_snapshot(
                 output_path=output,
                 taxonomy_l0_categories=["eat_and_drink"],
-                bbox={"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0},
+                boundary_gdf=_rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes=[
+                    {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+                ],
                 bucket="overturemaps-us-west-2",
                 s3_region="us-west-2",
                 release_date=None,

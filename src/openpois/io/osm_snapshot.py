@@ -4,9 +4,9 @@
 #   -------------------------------------------------------------
 
 """
-This module downloads a current/latest POI snapshot for the United States from
-OpenStreetMap using a Geofabrik PBF extract, osmium-tool CLI pre-filtering,
-and pyosmium parsing.
+This module downloads a current/latest POI snapshot for the US + Puerto Rico
+from OpenStreetMap using Geofabrik PBF extracts, osmium-tool CLI
+pre-filtering, and pyosmium parsing.
 
 It is broken into the following functions:
 
@@ -14,11 +14,21 @@ It is broken into the following functions:
 - filter_pbf: Runs osmium tags-filter to produce a reduced POI-only PBF.
 - parse_pbf_to_geodataframe: Parses the filtered PBF with pyosmium into a
     GeoDataFrame of nodes (Points) and ways (Polygons or Points).
-- download_osm_snapshot: End-to-end orchestrator.
+- download_osm_snapshot: End-to-end orchestrator. Downloads and parses both
+    the mainland US extract and the Puerto Rico extract, then concatenates
+    the results.
 
-Data source: https://download.geofabrik.de/north-america/us-latest.osm.pbf
-(~11 GB, updated daily). The osmium-tool CLI must be installed and on PATH
-(conda install -c conda-forge osmium-tool).
+Data sources:
+    - US mainland (all 50 states incl. AK + HI, ~11 GB):
+      https://download.geofabrik.de/north-america/us-latest.osm.pbf
+    - Puerto Rico (separate extract, ~tens of MB):
+      https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf
+
+Geofabrik extracts are cut along administrative boundaries, so no polygon
+post-filter is applied here — the two extracts together cover exactly the
+US + PR footprint.
+
+osmium-tool CLI must be installed (conda install -c conda-forge osmium-tool).
 
 Note: This module is separate from openpois.io.osm_history, which fetches
 historical OSM element version data for change-rate modeling. This module
@@ -342,69 +352,21 @@ def parse_pbf_to_geodataframe(
 # -----------------------------------------------------------------------------
 
 
-def download_osm_snapshot(
+def _download_filter_parse(
     pbf_url: str,
     raw_pbf_path: Path,
     filtered_pbf_path: Path,
-    output_path: Path,
     filter_keys: list[str],
-    extract_keys: list[str],
-    overwrite_download: bool = False,
-    overwrite_filter: bool = False,
-    source_label: str = "osm",
-    keep_all_keys: bool = False,
-    chunk_size: int = 500_000,
-    max_area_nodes: int | None = None,
-    chunk_dir: Path | None = None,
-    verbose: bool = True,
+    extract_keys: list[str] | None,
+    overwrite_download: bool,
+    overwrite_filter: bool,
+    source_label: str,
+    chunk_size: int,
+    max_area_nodes: int | None,
+    chunk_dir: Path | None,
+    verbose: bool,
 ) -> gpd.GeoDataFrame:
-    """
-    End-to-end orchestrator: download PBF, filter to POIs, parse, save
-    GeoParquet.
-
-    Steps:
-
-    1. download_pbf  — streams the Geofabrik US extract (~11 GB) to
-       raw_pbf_path.
-    2. filter_pbf    — runs osmium tags-filter to produce a small POI-only PBF.
-    3. parse_pbf_to_geodataframe — parses with pyosmium into a GeoDataFrame.
-    4. Saves as GeoParquet at output_path.
-
-    Steps 1 and 2 are skipped if the target files already exist unless
-    overwrite_download / overwrite_filter are True.
-
-    Args:
-        pbf_url: URL of the full US PBF extract (e.g., Geofabrik US extract).
-        raw_pbf_path: Local path to store the downloaded raw PBF.
-        filtered_pbf_path: Local path to store the filtered PBF.
-        output_path: Path to write the output GeoParquet file.
-        filter_keys: OSM tag keys used to filter elements in the PBF. Elements
-            lacking all of these keys are excluded.
-        extract_keys: OSM tag keys to include as output columns. If None, all
-            tags on accepted elements are extracted.
-        overwrite_download: Re-download even if raw_pbf_path exists.
-        overwrite_filter: Re-filter even if filtered_pbf_path exists.
-        source_label: Value for the output 'source' column.
-        keep_all_keys: If True, all OSM tags are retained as columns in the
-            output GeoDataFrame, not just those in osm_keys. osm_keys is still
-            used to filter which elements are included.
-        chunk_size: Number of POI records per parquet chunk during parsing.
-            Lower values reduce peak memory usage.
-        max_area_nodes: If set, relation-derived areas with more than this
-            many total coordinate nodes are skipped before any Shapely
-            geometry is built. Useful for excluding large multipolygons
-            (parks, admin boundaries) that can exhaust memory. None disables
-            the check.
-        chunk_dir: Directory under which a ``parse_chunks/`` subdirectory is
-            created to hold intermediate chunk files. Defaults to the parent
-            of filtered_pbf_path. See parse_pbf_to_geodataframe for details.
-        verbose: If True, log progress after each chunk is flushed.
-
-    Returns:
-        GeoDataFrame written to output_path.
-    """
-    output_path = Path(output_path)
-
+    """Download a single Geofabrik PBF, filter it, and parse it to a GDF."""
     download_pbf(
         url = pbf_url,
         output_path = raw_pbf_path,
@@ -416,10 +378,10 @@ def download_osm_snapshot(
         osm_keys = filter_keys,
         overwrite = overwrite_filter,
     )
-    gdf = parse_pbf_to_geodataframe(
+    return parse_pbf_to_geodataframe(
         pbf_path = filtered_pbf_path,
         filter_keys = filter_keys,
-        extract_keys = None if keep_all_keys else extract_keys,
+        extract_keys = extract_keys,
         source_label = source_label,
         chunk_size = chunk_size,
         max_area_nodes = max_area_nodes,
@@ -427,7 +389,118 @@ def download_osm_snapshot(
         verbose = verbose,
     )
 
+
+def download_osm_snapshot(
+    pbf_url: str,
+    raw_pbf_path: Path,
+    filtered_pbf_path: Path,
+    output_path: Path,
+    filter_keys: list[str],
+    extract_keys: list[str],
+    pr_pbf_url: str,
+    raw_pr_pbf_path: Path,
+    filtered_pr_pbf_path: Path,
+    overwrite_download: bool = False,
+    overwrite_filter: bool = False,
+    source_label: str = "osm",
+    keep_all_keys: bool = False,
+    chunk_size: int = 500_000,
+    max_area_nodes: int | None = None,
+    chunk_dir: Path | None = None,
+    verbose: bool = True,
+) -> gpd.GeoDataFrame:
+    """
+    End-to-end orchestrator: download both the US-mainland and Puerto Rico
+    Geofabrik PBFs, filter each to POIs, parse each, concat, and save as
+    GeoParquet.
+
+    For each PBF the steps are:
+
+    1. download_pbf — streams the PBF to the raw_pbf path.
+    2. filter_pbf — runs osmium tags-filter to produce a POI-only PBF.
+    3. parse_pbf_to_geodataframe — parses with pyosmium into a GeoDataFrame.
+
+    The two GeoDataFrames are concatenated and written to output_path.
+
+    Steps 1 and 2 are skipped if the target files already exist unless
+    overwrite_download / overwrite_filter are True.
+
+    Args:
+        pbf_url: URL of the US-mainland PBF extract (Geofabrik us-latest,
+            all 50 states including AK + HI).
+        raw_pbf_path: Local path to store the US-mainland raw PBF.
+        filtered_pbf_path: Local path to store the US-mainland filtered PBF.
+        output_path: Path to write the output GeoParquet file.
+        filter_keys: OSM tag keys used to filter elements in the PBF. Elements
+            lacking all of these keys are excluded.
+        extract_keys: OSM tag keys to include as output columns. If None, all
+            tags on accepted elements are extracted.
+        pr_pbf_url: URL of the Puerto Rico PBF extract
+            (Geofabrik puerto-rico-latest). Geofabrik serves this separately
+            from the US extract.
+        raw_pr_pbf_path: Local path to store the PR raw PBF.
+        filtered_pr_pbf_path: Local path to store the PR filtered PBF.
+        overwrite_download: Re-download even if raw paths exist.
+        overwrite_filter: Re-filter even if filtered paths exist.
+        source_label: Value for the output 'source' column.
+        keep_all_keys: If True, all OSM tags are retained as columns in the
+            output GeoDataFrame, not just those in extract_keys. filter_keys
+            is still used to filter which elements are included.
+        chunk_size: Number of POI records per parquet chunk during parsing.
+            Lower values reduce peak memory usage.
+        max_area_nodes: If set, relation-derived areas with more than this
+            many total coordinate nodes are skipped before any Shapely
+            geometry is built. Useful for excluding large multipolygons
+            (parks, admin boundaries) that can exhaust memory. None disables
+            the check.
+        chunk_dir: Directory under which a ``parse_chunks/`` subdirectory is
+            created to hold intermediate chunk files. Defaults to the parent
+            of each filtered PBF. See parse_pbf_to_geodataframe for details.
+        verbose: If True, log progress after each chunk is flushed.
+
+    Returns:
+        GeoDataFrame written to output_path.
+    """
+    output_path = Path(output_path)
+    resolved_extract_keys = None if keep_all_keys else extract_keys
+
+    print("Processing US-mainland extract...")
+    us_gdf = _download_filter_parse(
+        pbf_url = pbf_url,
+        raw_pbf_path = raw_pbf_path,
+        filtered_pbf_path = filtered_pbf_path,
+        filter_keys = filter_keys,
+        extract_keys = resolved_extract_keys,
+        overwrite_download = overwrite_download,
+        overwrite_filter = overwrite_filter,
+        source_label = source_label,
+        chunk_size = chunk_size,
+        max_area_nodes = max_area_nodes,
+        chunk_dir = chunk_dir,
+        verbose = verbose,
+    )
+
+    print("Processing Puerto Rico extract...")
+    pr_gdf = _download_filter_parse(
+        pbf_url = pr_pbf_url,
+        raw_pbf_path = raw_pr_pbf_path,
+        filtered_pbf_path = filtered_pr_pbf_path,
+        filter_keys = filter_keys,
+        extract_keys = resolved_extract_keys,
+        overwrite_download = overwrite_download,
+        overwrite_filter = overwrite_filter,
+        source_label = source_label,
+        chunk_size = chunk_size,
+        max_area_nodes = max_area_nodes,
+        chunk_dir = chunk_dir,
+        verbose = verbose,
+    )
+
+    print(f"Concatenating US ({len(us_gdf):,}) + PR ({len(pr_gdf):,}) POIs...")
+    gdf = pd.concat([us_gdf, pr_gdf], ignore_index = True)
+    gdf = gpd.GeoDataFrame(gdf, geometry = "geometry", crs = "EPSG:4326")
+
     output_path.parent.mkdir(parents = True, exist_ok = True)
     gdf.to_parquet(output_path)
-    print(f"Saved OSM snapshot to {output_path}")
+    print(f"Saved OSM snapshot ({len(gdf):,} POIs) to {output_path}")
     return gdf

@@ -5,13 +5,20 @@
 
 """
 This module downloads a current/latest Foursquare OS Places snapshot for the
-United States via the Foursquare Places Portal Apache Iceberg catalog.
+US + Puerto Rico via the Foursquare Places Portal Apache Iceberg catalog.
 
 It is broken into the following functions:
 - get_fsq_catalog: Authenticates to the Foursquare Iceberg REST catalog.
 - get_latest_fsq_release_date: Identifies the most recent snapshot date.
-- load_fsq_us_places: Loads US places filtered by L1 category from the catalog.
+- load_fsq_us_places: Loads US+PR places filtered by L1 category from the
+    catalog, then applies an exact polygon filter.
 - download_foursquare_snapshot: End-to-end orchestrator.
+
+Spatial filter strategy: PyIceberg row filters do not support spatial
+predicates, so we prefilter with ``country IN ('US', 'PR')`` at the
+catalog level (Foursquare uses ISO alpha-2 codes, so PR is coded 'PR') and
+apply an exact ``within`` check against the US+PR polygon in Python after
+loading.
 
 Authentication:
     Register at https://places.foursquare.com to obtain a portal token.
@@ -150,15 +157,16 @@ def load_fsq_us_places(
     catalog_namespace: str,
     places_table: str,
     categories_table: str,
+    boundary_gdf: gpd.GeoDataFrame,
 ) -> gpd.GeoDataFrame:
     """
-    Loads US places from the Foursquare Iceberg catalog, filtered by country
-    and L1 category name.
+    Loads US+PR places from the Foursquare Iceberg catalog, filtered by
+    country, L1 category name, and the US+PR boundary polygon.
 
-    Reads the places and categories tables, joins on fsq_category_ids to
-    resolve the L1 category hierarchy, then filters to rows where any element
-    of fsq_category_labels starts with a name in l1_category_names and
-    date_closed is null.
+    Reads the places and categories tables, resolves the L1 category
+    hierarchy via fsq_category_ids, filters to open places whose country is
+    'US' or 'PR' (Foursquare uses ISO alpha-2 country codes), and then
+    applies an exact ``within`` check against ``boundary_gdf``.
 
     Args:
         catalog: An authenticated RestCatalog instance.
@@ -170,6 +178,9 @@ def load_fsq_us_places(
         catalog_namespace: Iceberg namespace containing the FSQ tables.
         places_table: Name of the places table within the namespace.
         categories_table: Name of the categories table within the namespace.
+        boundary_gdf: Single-row GeoDataFrame in EPSG:4326 containing the
+            dissolved, buffered US+PR polygon. Obtain from
+            ``openpois.io.boundary``.
 
     Returns:
         GeoDataFrame with columns:
@@ -199,9 +210,11 @@ def load_fsq_us_places(
         zip(cats_df["category_id"], cats_df["level1_category_name"])
     )
 
-    # Load US places (table is unpartitioned; filter by country and open status)
+    # Load US + PR places (table is unpartitioned; filter by country and
+    # open status). PyIceberg row filters do not support spatial predicates;
+    # the exact polygon filter happens below after the GeoDataFrame is built.
     places_scan = places_table_obj.scan(
-        row_filter = "country = 'US' AND date_closed IS NULL",
+        row_filter = "country IN ('US', 'PR') AND date_closed IS NULL",
         selected_fields = (
             "fsq_place_id",
             "name",
@@ -242,6 +255,17 @@ def load_fsq_us_places(
         ),
         crs = "EPSG:4326",
     )
+
+    print("Applying exact US+PR polygon filter...")
+    n_before = len(gdf)
+    boundary_one_col = boundary_gdf[["geometry"]].to_crs(gdf.crs)
+    gdf = gpd.sjoin(
+        gdf, boundary_one_col, predicate = "within", how = "inner"
+    ).drop(columns = "index_right").reset_index(drop = True)
+    print(
+        f"Polygon filter kept {len(gdf):,} of {n_before:,} "
+        f"({n_before - len(gdf):,} dropped outside US+PR)."
+    )
     return gdf
 
 
@@ -259,12 +283,14 @@ def download_foursquare_snapshot(
     places_table: str,
     categories_table: str,
     token_env_var: str,
+    boundary_gdf: gpd.GeoDataFrame,
     release_date: str | None = None,
     token: str | None = None,
 ) -> gpd.GeoDataFrame:
     """
-    End-to-end orchestrator: connect to the Foursquare catalog, load US
-    places filtered by L1 category, and save as GeoParquet.
+    End-to-end orchestrator: connect to the Foursquare catalog, load US+PR
+    places filtered by L1 category, apply the polygon filter, save as
+    GeoParquet.
 
     Reads the portal token from the environment variable named by token_env_var
     if token is not supplied directly.
@@ -278,6 +304,9 @@ def download_foursquare_snapshot(
         places_table: Name of the places table within the namespace.
         categories_table: Name of the categories table within the namespace.
         token_env_var: Name of the environment variable holding the portal token.
+        boundary_gdf: Single-row GeoDataFrame in EPSG:4326 containing the
+            dissolved, buffered US+PR polygon. Obtain from
+            ``openpois.io.boundary``.
         release_date: Snapshot date to download (e.g., '2026-02-12').
             If None, uses the latest available snapshot.
         token: Foursquare portal API token. If None, reads from the
@@ -305,7 +334,7 @@ def download_foursquare_snapshot(
         )
         print(f"Using release: {release_date}")
 
-    print(f"Loading Foursquare US places for release {release_date}...")
+    print(f"Loading Foursquare US+PR places for release {release_date}...")
     gdf = load_fsq_us_places(
         catalog = catalog,
         release_date = release_date,
@@ -313,6 +342,7 @@ def download_foursquare_snapshot(
         catalog_namespace = catalog_namespace,
         places_table = places_table,
         categories_table = categories_table,
+        boundary_gdf = boundary_gdf,
     )
 
     gdf.to_parquet(output_path)
