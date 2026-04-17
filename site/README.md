@@ -22,4 +22,4 @@ When a new snapshot is uploaded to S3, update the date strings in two places:
   access section
 
 The OSM/Foursquare and conflated snapshots may have different dates (e.g.
-OSM `20260313`, conflated `20260318`), so update each URL individually.
+Foursquare `20260313`, OSM/conflated `20260416`), so update each URL individually.
