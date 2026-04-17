@@ -224,6 +224,16 @@ conflation:
   identifier_weight: 0.20
   chunk_size: 500_000
   chunk_target_pois: 200_000
+  # Overture-internal deduplication runs before OSM × Overture
+  # matching. Self-matches Overture POIs, groups them into clusters,
+  # and drops non-winners so they never reach the cross-source stage.
+  # See ``openpois.conflation.dedup_overture.mark_no_conflate``.
+  overture_internal_dedup:
+    enabled: true
+    min_match_score: 0.75
+    max_radius_m: 100
+    chunk_target_pois: 200_000
+    duckdb_memory_limit: "4GB"
   test_bbox:
     xmin: -122.45
     ymin: 47.50

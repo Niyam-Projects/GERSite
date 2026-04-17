@@ -48,6 +48,7 @@ from config_versioned import Config
 from shapely.geometry import box
 
 from openpois.conflation.chunking import extract_centroids_lonlat
+from openpois.conflation.dedup_overture import mark_no_conflate
 from openpois.conflation.match import (
     compute_match_scores,
     find_and_score_matches_chunked,
@@ -56,6 +57,9 @@ from openpois.conflation.match import (
 )
 
 CHECKPOINT_SUBDIR = "chunk_matches"
+DEDUP_CHECKPOINT_SUBDIR = "chunk_selfdedup"
+DEDUP_DROPPED_FILE = "overture_dedup_dropped.parquet"
+DEDUP_POST_FILTER_FILE = "overture_post_dedup.parquet"
 from openpois.conflation.merge import (
     build_merge_parts,
     build_merge_parts_chunked,
@@ -140,6 +144,19 @@ CHUNK_TARGET_POIS = config.get(
 )
 TEST_BBOX = config.get("conflation", "test_bbox")
 
+DEDUP_CFG = config.get(
+    "conflation", "overture_internal_dedup",
+)
+DEDUP_ENABLED = bool(DEDUP_CFG.get("enabled", True))
+DEDUP_MIN_SCORE = float(DEDUP_CFG.get("min_match_score", 0.75))
+DEDUP_MAX_RADIUS_M = float(DEDUP_CFG.get("max_radius_m", 100))
+DEDUP_CHUNK_TARGET = int(
+    DEDUP_CFG.get("chunk_target_pois", CHUNK_TARGET_POIS)
+)
+DEDUP_DUCKDB_MEM = str(
+    DEDUP_CFG.get("duckdb_memory_limit", "4GB")
+)
+
 # Columns needed for matching (memory optimization)
 OSM_MATCH_COLS = [
     "osm_id", "osm_type", "name", "brand", "brand:wikidata",
@@ -166,6 +183,48 @@ OVERTURE_MERGE_COLS = [
 # -----------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------
+
+
+def _write_dedup_audit(
+    overture_gdf,
+    no_conflate: np.ndarray,
+    components: np.ndarray,
+    audit_path: Path,
+) -> None:
+    """Write one row per dropped Overture POI with its cluster winner.
+
+    Columns: overture_id, cluster_id, winner_overture_id,
+    confidence, geometry. Small file (~1 row per dropped POI); lets
+    us spot-check dedup decisions in a GIS or with DuckDB.
+    """
+    losers_idx = np.where(no_conflate)[0]
+    if len(losers_idx) == 0:
+        return
+
+    n_comps = int(components.max()) + 1
+    winner_of = np.full(n_comps, -1, dtype = np.int64)
+    not_loser_idx = np.where(~no_conflate)[0]
+    winner_of[components[not_loser_idx]] = not_loser_idx
+    winner_idx = winner_of[components[losers_idx]]
+
+    ids = overture_gdf["overture_id"].to_numpy()
+    confidence = (
+        overture_gdf["confidence"].to_numpy()
+        if "confidence" in overture_gdf.columns
+        else np.full(len(overture_gdf), None, dtype = object)
+    )
+    audit = gpd.GeoDataFrame(
+        {
+            "overture_id": ids[losers_idx],
+            "cluster_id": components[losers_idx],
+            "winner_overture_id": ids[winner_idx],
+            "confidence": confidence[losers_idx],
+            "geometry": overture_gdf.geometry.values[losers_idx],
+        },
+        crs = overture_gdf.crs,
+    )
+    audit_path.parent.mkdir(parents = True, exist_ok = True)
+    audit.to_parquet(audit_path, compression = "zstd")
 
 
 def _load_gdf(
@@ -235,39 +294,131 @@ if __name__ == "__main__":
     log_rss("after Overture load")
 
     # -- Taxonomy assignment ---------------------------------------
-    print("\nAssigning shared labels ...")
-    osm_crosswalk = load_osm_crosswalk()
+    # Overture taxonomy is assigned first so the internal-dedup pass
+    # (below) can reuse shared_label + L0 bits for its type scoring.
+    # OSM taxonomy follows after dedup has filtered Overture rows.
+    print("\nAssigning Overture shared labels ...")
     overture_crosswalk = load_overture_crosswalk()
     match_radii = load_match_radii()
     top_level_matches = load_top_level_matches()
 
-    osm_shared_labels, osm_radii = assign_osm_shared_label(
-        osm_gdf, osm_crosswalk, match_radii, FILTER_KEYS,
-        default_radius_m = DEFAULT_RADIUS_M,
-    )
     overture_shared_labels, overture_radii = (
         assign_overture_shared_label(
             overture_gdf, overture_crosswalk, match_radii,
             default_radius_m = DEFAULT_RADIUS_M,
         )
     )
-
-    osm_assigned = np.sum(osm_shared_labels != "")
     ov_assigned = np.sum(overture_shared_labels != "")
-    print(
-        f"  OSM: {osm_assigned:,}/{len(osm_gdf):,} assigned"
-    )
     print(
         f"  Overture: {ov_assigned:,}/{len(overture_gdf):,}"
         f" assigned"
     )
-
-    # Compute L0 bitmasks BEFORE dropping tag columns
-    osm_l0_bits = compute_osm_l0_bits(
-        osm_gdf, top_level_matches,
-    )
     overture_l0_bits = compute_overture_l0_bits(
         overture_gdf["taxonomy_l0"].fillna("").to_numpy(),
+    )
+    del overture_crosswalk
+    log_rss("after Overture taxonomy assignment")
+
+    # -- Overture internal deduplication ---------------------------
+    conflation_dir = Path(OUTPUT_PATH).parent
+    dedup_summary: dict | None = None
+    # Path used for the Overture reload at merge time. Overridden to
+    # a post-dedup temp parquet when dedup runs so the reload's row
+    # indices match the match-phase output.
+    overture_merge_source_path = OVERTURE_PATH
+    overture_merge_needs_test_bbox = True
+    if DEDUP_ENABLED:
+        dedup_checkpoint_dir = (
+            conflation_dir / DEDUP_CHECKPOINT_SUBDIR
+        )
+        (
+            no_conflate,
+            dedup_components,
+            dedup_pairs,
+            dedup_summary,
+        ) = mark_no_conflate(
+            overture_gdf,
+            overture_shared_labels,
+            overture_l0_bits,
+            min_match_score = DEDUP_MIN_SCORE,
+            max_radius_m = DEDUP_MAX_RADIUS_M,
+            chunk_target_pois = DEDUP_CHUNK_TARGET,
+            chunk_size = CHUNK_SIZE,
+            checkpoint_dir = dedup_checkpoint_dir,
+            duckdb_memory_limit = DEDUP_DUCKDB_MEM,
+        )
+        log_rss(
+            f"after Overture dedup "
+            f"({dedup_summary['n_dropped']:,} marked)"
+        )
+
+        if no_conflate.any():
+            audit_path = conflation_dir / DEDUP_DROPPED_FILE
+            _write_dedup_audit(
+                overture_gdf, no_conflate,
+                dedup_components, audit_path,
+            )
+            print(
+                f"  Wrote {dedup_summary['n_dropped']:,} dropped "
+                f"rows to {audit_path}"
+            )
+
+        # Filter overture rows + parallel arrays. A boolean-mask
+        # copy allocates a fresh frame; ``del`` + ``gc.collect`` on
+        # the old one releases the dropped-rows' memory before the
+        # OSM taxonomy + matching phase begins.
+        keep_mask = ~no_conflate
+        n_before = len(overture_gdf)
+        overture_gdf = (
+            overture_gdf.loc[keep_mask].reset_index(drop = True)
+        )
+        overture_shared_labels = overture_shared_labels[keep_mask]
+        overture_radii = overture_radii[keep_mask]
+        overture_l0_bits = overture_l0_bits[keep_mask]
+        del (
+            no_conflate, dedup_components,
+            dedup_pairs, keep_mask,
+        )
+        gc.collect()
+        if dedup_checkpoint_dir.exists():
+            shutil.rmtree(dedup_checkpoint_dir)
+        print(
+            f"  Overture rows after dedup: {len(overture_gdf):,} "
+            f"(dropped {n_before - len(overture_gdf):,})"
+        )
+
+        # Spill post-dedup Overture to disk so the later merge-phase
+        # reload sees rows whose indices match the match-phase output
+        # (the pre-dedup snapshot on disk would misalign against
+        # ``matches.overture_idx``). Minimal column set — merge adds
+        # no metadata beyond what's already here.
+        overture_merge_source_path = (
+            conflation_dir / DEDUP_POST_FILTER_FILE
+        )
+        overture_merge_source_path.parent.mkdir(
+            parents = True, exist_ok = True,
+        )
+        overture_gdf.to_parquet(
+            overture_merge_source_path, compression = "zstd",
+        )
+        overture_merge_needs_test_bbox = False
+        log_rss("after Overture dedup filter")
+    else:
+        print("\nOverture internal deduplication disabled.")
+
+    # -- OSM taxonomy assignment -----------------------------------
+    print("\nAssigning OSM shared labels ...")
+    osm_crosswalk = load_osm_crosswalk()
+    osm_shared_labels, osm_radii = assign_osm_shared_label(
+        osm_gdf, osm_crosswalk, match_radii, FILTER_KEYS,
+        default_radius_m = DEFAULT_RADIUS_M,
+    )
+    osm_assigned = np.sum(osm_shared_labels != "")
+    print(
+        f"  OSM: {osm_assigned:,}/{len(osm_gdf):,} assigned"
+    )
+    osm_l0_bits = compute_osm_l0_bits(
+        osm_gdf, top_level_matches,
     )
 
     # Drop columns only needed for taxonomy assignment
@@ -280,7 +431,7 @@ if __name__ == "__main__":
     for col in ["taxonomy_l0", "taxonomy_l1", "taxonomy_l2"]:
         if col in overture_gdf.columns:
             overture_gdf.drop(columns = col, inplace = True)
-    del osm_crosswalk, overture_crosswalk, top_level_matches
+    del osm_crosswalk, top_level_matches, match_radii
     log_rss("after taxonomy assignment + tag-col drop")
 
     # -- Matching --------------------------------------------------
@@ -362,7 +513,6 @@ if __name__ == "__main__":
             gc.collect()
     else:
         # -- Chunked driver (default) ------------------------------
-        conflation_dir = Path(OUTPUT_PATH).parent
         checkpoint_dir = conflation_dir / CHECKPOINT_SUBDIR
         print(
             f"\nRunning chunked matching "
@@ -451,8 +601,12 @@ if __name__ == "__main__":
             test_bbox = test_bbox, label = "OSM (merge cols)",
         )
         overture_gdf = _load_gdf(
-            OVERTURE_PATH, OVERTURE_MERGE_COLS,
-            test_bbox = test_bbox,
+            overture_merge_source_path,
+            OVERTURE_MERGE_COLS,
+            test_bbox = (
+                test_bbox if overture_merge_needs_test_bbox
+                else None
+            ),
             label = "Overture (merge cols)",
         )
         log_rss("after reload for merge")
@@ -493,6 +647,13 @@ if __name__ == "__main__":
     # Clear chunk checkpoints after a successful save.
     if checkpoint_dir is not None and checkpoint_dir.exists():
         shutil.rmtree(checkpoint_dir)
+    # Clear the post-dedup Overture temp parquet (kept only to back
+    # the merge-phase reload).
+    if (
+        overture_merge_source_path != OVERTURE_PATH
+        and overture_merge_source_path.exists()
+    ):
+        overture_merge_source_path.unlink()
 
     # -- Summary ---------------------------------------------------
     elapsed = time.time() - t0
@@ -517,5 +678,11 @@ if __name__ == "__main__":
         print(
             f"  Overture dedup drops: "
             f"{chunk_summary['n_overture_dedup_drops']:,}"
+        )
+    if dedup_summary is not None:
+        print(
+            f"  Overture internal dedup: "
+            f"{dedup_summary['n_dropped']:,} dropped across "
+            f"{dedup_summary['n_multi_clusters']:,} clusters"
         )
     print(f"  Output: {OUTPUT_PATH}")
