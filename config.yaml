@@ -1,12 +1,12 @@
 # Versioned directories (used with config.get_dir_path())
 versions:
   osm_data: "20260416"
-  model_output: "20260315"
+  model_output: "20260416_by_leisure"
   snapshot_osm: "20260416"
-  snapshot_overture: "20260416"
+  snapshot_overture: "20260417"
   snapshot_foursquare: "20260416"
   aws: "20260416"
-  conflation: "20260416"
+  conflation: "20260417"
 
 # Settings for downloading data
 download:
@@ -48,16 +48,16 @@ download:
     chunk_size: 100_000
     max_area_nodes: 1_000
     verbose: true
-    filter_keys: ['shop', 'healthcare', 'leisure', 'amenity']
+    filter_keys: ['shop', 'healthcare', 'leisure', 'amenity', 'tourism', 'office', 'craft', 'historic']
     extract_keys: [
       'addr:city','addr:country','addr:housename','addr:housenumber','addr:postcode',
       'addr:state','addr:street','addr:unit','amenity','atm','bar','bicycle',
       'bicycle_parking','brand','brand:wikidata','building','check_date',
-      'check_date:opening_hours','cuisine','description','education','email',
+      'check_date:opening_hours','craft','cuisine','description','education','email',
       'emergency','fountain','geometry','healthcare','healthcare:speciality','historic',
-      'image','landuse','leisure','name','nursery','official_name','old_name',
+      'image','landuse','leisure','name','nursery','office','official_name','old_name',
       'opening_date','opening_hours','osm_id','osm_type','phone','playground','preschool',
-      'recycling_type','self_service','service','shelter','shop','short_name',
+      'recycling_type','religion','self_service','service','shelter','shop','short_name',
       'social_facility','social_facility:for','source','sport','tourism','type','url',
       'website','wikidata','wikipedia'
     ]
@@ -65,12 +65,36 @@ download:
     release_date: null  # null = auto-detect latest
     s3_bucket: "overturemaps-us-west-2"
     s3_region: "us-west-2"
-    taxonomy_l0_categories:
-      - food_and_drink
-      - shopping
-      - arts_and_entertainment
-      - sports_and_recreation
-      - health_care
+    # (L0, L1) allowlist. L1 = null means "all of this L0".
+    # Entries intentionally exclude office/B2B-style L1s (corporate offices,
+    # media services, etc.), transit/parking/airports (covered elsewhere), and
+    # private lodging (Airbnb-style — duplicates residential addresses).
+    taxonomy_allowlist:
+      - [food_and_drink, null]
+      - [shopping, null]
+      - [arts_and_entertainment, null]
+      - [sports_and_recreation, null]
+      - [health_care, null]
+      - [lodging, null]
+      - [cultural_and_historic, null]
+      - [education, null]
+      - [lifestyle_services, personal_or_beauty_service]
+      - [lifestyle_services, wellness_service]
+      - [lifestyle_services, animal_or_pet_service]
+      - [lifestyle_services, beauty_service]
+      - [lifestyle_services, food_service]
+      - [services_and_business, financial_service]
+      - [services_and_business, legal_service]
+      - [services_and_business, professional_service]
+      - [services_and_business, real_estate_service]
+      - [services_and_business, home_service]
+      - [community_and_government, social_or_community_service]
+      - [community_and_government, government_office]
+      - [community_and_government, civic_organization]
+      - [community_and_government, public_facility]
+      - [community_and_government, public_safety_service]
+      - [travel_and_transportation, fueling_station]
+      - [travel_and_transportation, vehicle_service]
   foursquare:
     release_date: null  # null = auto-detect latest
     catalog_uri: "https://catalog.h3-hub.foursquare.com/iceberg"
@@ -95,14 +119,14 @@ osm_data:
     - last_obs_timestamp
     - last_tag_timestamp
   apply_model:
-    model_stub: '20260315'
+    model_stub: '20260416'
 
 # Settings for exploratory/models/pytorch_simple.py
 osm_turnover_model:
-  model_type: constant
+  model_type: random_by_type
   tag_key: name
   var_prior: [-1.0, 5.0]
-  group_key: null
+  group_key: leisure_last_value
   group_values: null
   min_value_count: 5
   n_draws: 250
