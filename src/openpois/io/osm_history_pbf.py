@@ -75,6 +75,7 @@ CHANGES_SCHEMA = pa.schema([
     ("change", pa.string()),
     ("id", pa.int64()),
     ("version", pa.int64()),
+    ("type", pa.string()),
 ])
 
 
@@ -493,6 +494,7 @@ def parse_history_pbf(
             for diff_row in _diff_tag_sets(prev_tags, curr_tags):
                 diff_row["id"] = int(obj.id)
                 diff_row["version"] = int(obj.version)
+                diff_row["type"] = kind
                 changes_buf.append(diff_row)
 
             prev_key = key
@@ -520,23 +522,103 @@ def parse_history_pbf(
 
 
 # -----------------------------------------------------------------------------
-# Parquet concatenation (US + PR)
+# Parquet concatenation (US + PR) with cross-extract deduplication
 # -----------------------------------------------------------------------------
 
 
-def _concat_parquets(
-    inputs: list[Path],
-    output: Path,
-    schema: pa.Schema,
-) -> Path:
-    """Stream-concatenate row groups from ``inputs`` into ``output``."""
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with pq.ParquetWriter(output, schema) as writer:
-        for path in inputs:
-            reader = pq.ParquetFile(str(path))
-            for batch in reader.iter_batches():
-                writer.write_table(pa.Table.from_batches([batch], schema=schema))
-    return output
+def _concat_history(
+    us_versions_path: Path,
+    pr_versions_path: Path,
+    out_versions_path: Path,
+    us_changes_path: Path,
+    pr_changes_path: Path,
+    out_changes_path: Path,
+) -> tuple[Path, Path]:
+    """
+    Stream-concatenate US + PR versions/changes Parquets, dropping PR rows for
+    any element already present in the US file.
+
+    Geofabrik's per-state/-territory extracts share near-boundary elements:
+    the same ``(type, id)`` version can legitimately appear in both the
+    US-mainland and Puerto Rico extracts. Concatenating naively would produce
+    duplicate rows per ``(id, version, key)`` in the changes Parquet, which
+    breaks ``format_observations`` (it calls ``.loc[key, "change"]`` and
+    expects a scalar, not a Series).
+
+    Strategy:
+    - Stream-copy US versions to the output, collecting the set of
+      ``(type, id)`` seen.
+    - Load PR versions fully (small — PR is ~70K versions), drop any row whose
+      ``(type, id)`` is already in US, write the remainder.
+    - Stream-copy US changes to the output.
+    - Load PR changes fully, drop any row whose ``id`` matches an element
+      dropped from PR versions, write the remainder.
+
+    Dedup is ``(type, id)``-keyed in both tables. OSM element ids are only
+    unique *within* a type, so an id-only join would incorrectly collapse a
+    node and a way that share an integer id — see the change-log for the
+    bug that motivated adding ``type`` to ``osm_changes``.
+
+    Args:
+        us_versions_path: Intermediate US versions Parquet.
+        pr_versions_path: Intermediate PR versions Parquet.
+        out_versions_path: Final concatenated versions Parquet.
+        us_changes_path: Intermediate US changes Parquet.
+        pr_changes_path: Intermediate PR changes Parquet.
+        out_changes_path: Final concatenated changes Parquet.
+
+    Returns:
+        Tuple ``(out_versions_path, out_changes_path)``.
+    """
+    out_versions_path.parent.mkdir(parents=True, exist_ok=True)
+    out_changes_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Pass 1: versions
+    us_type_ids: set[tuple[str, int]] = set()
+    with pq.ParquetWriter(out_versions_path, VERSIONS_SCHEMA) as writer:
+        us_reader = pq.ParquetFile(str(us_versions_path))
+        for batch in us_reader.iter_batches():
+            tbl = pa.Table.from_batches([batch], schema=VERSIONS_SCHEMA)
+            us_type_ids.update(
+                zip(
+                    tbl.column("type").to_pylist(),
+                    tbl.column("id").to_pylist(),
+                )
+            )
+            writer.write_table(tbl)
+        pr_v = pq.read_table(str(pr_versions_path), schema=VERSIONS_SCHEMA)
+        pr_types = pr_v.column("type").to_pylist()
+        pr_ids = pr_v.column("id").to_pylist()
+        keep_mask = [
+            (t, i) not in us_type_ids for t, i in zip(pr_types, pr_ids)
+        ]
+        pr_dropped_type_ids = {
+            (t, i) for (t, i), keep in zip(zip(pr_types, pr_ids), keep_mask)
+            if not keep
+        }
+        pr_v_filtered = pr_v.filter(pa.array(keep_mask, type=pa.bool_()))
+        if pr_v_filtered.num_rows > 0:
+            writer.write_table(pr_v_filtered)
+
+    # Pass 2: changes
+    with pq.ParquetWriter(out_changes_path, CHANGES_SCHEMA) as writer:
+        us_reader = pq.ParquetFile(str(us_changes_path))
+        for batch in us_reader.iter_batches():
+            writer.write_table(pa.Table.from_batches([batch], schema=CHANGES_SCHEMA))
+        pr_c = pq.read_table(str(pr_changes_path), schema=CHANGES_SCHEMA)
+        if pr_dropped_type_ids and pr_c.num_rows > 0:
+            keep_mask = [
+                (t, i) not in pr_dropped_type_ids
+                for t, i in zip(
+                    pr_c.column("type").to_pylist(),
+                    pr_c.column("id").to_pylist(),
+                )
+            ]
+            pr_c = pr_c.filter(pa.array(keep_mask, type=pa.bool_()))
+        if pr_c.num_rows > 0:
+            writer.write_table(pr_c)
+
+    return out_versions_path, out_changes_path
 
 
 # -----------------------------------------------------------------------------
@@ -691,15 +773,13 @@ def download_osm_history(
         "Concatenating US + PR Parquets into"
         f" {output_versions_path} / {output_changes_path}..."
     )
-    _concat_parquets(
-        inputs=[us_versions_path, pr_versions_path],
-        output=output_versions_path,
-        schema=VERSIONS_SCHEMA,
-    )
-    _concat_parquets(
-        inputs=[us_changes_path, pr_changes_path],
-        output=output_changes_path,
-        schema=CHANGES_SCHEMA,
+    _concat_history(
+        us_versions_path=us_versions_path,
+        pr_versions_path=pr_versions_path,
+        out_versions_path=output_versions_path,
+        us_changes_path=us_changes_path,
+        pr_changes_path=pr_changes_path,
+        out_changes_path=output_changes_path,
     )
     print(
         f"Saved OSM history to {output_versions_path} and {output_changes_path}"

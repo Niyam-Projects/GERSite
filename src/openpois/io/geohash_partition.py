@@ -73,17 +73,20 @@ def write_partitioned_dataset(
                 "Pass overwrite=True to replace it."
             )
 
-    gdf = gdf.sort_values(["geohash_prefix", "geohash_sort"]).drop(
-        columns = ["geohash_sort"]
-    )
-    cols = [c for c in gdf.columns if c != "geohash_prefix"]
-    n_partitions = gdf["geohash_prefix"].nunique()
+    cols = [c for c in gdf.columns if c not in ("geohash_prefix", "geohash_sort")]
     output_dir.mkdir(parents = True, exist_ok = True)
 
+    # Iterate without a global sort_values: that would double peak memory on
+    # multi-GB frames. groupby(sort = False) hands us each partition as a view;
+    # each small partition is sorted in-place before writing.
+    groups = gdf.groupby("geohash_prefix", sort = False, observed = True)
+    n_partitions = len(groups)
     print(f"Writing {n_partitions} partitions to {output_dir} ...")
-    for i, (prefix, group) in enumerate(gdf.groupby("geohash_prefix")):
+    for i, (prefix, group) in enumerate(groups):
         partition_dir = output_dir / f"geohash_prefix={prefix}"
         partition_dir.mkdir()
-        group[cols].to_parquet(partition_dir / "part-0.parquet")
+        group.sort_values("geohash_sort")[cols].to_parquet(
+            partition_dir / "part-0.parquet"
+        )
         if (i + 1) % 100 == 0:
             print(f"  {i + 1}/{n_partitions} partitions written...")
