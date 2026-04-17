@@ -10,7 +10,7 @@ export const CONFLATED_S3_BASE =
 
 // Overture PMTiles (latest release — update URL on each Overture monthly release)
 export const OVERTURE_PMTILES_URL =
-  'https://tiles.overturemaps.org/2026-02-18.0/places.pmtiles'
+  'https://tiles.overturemaps.org/2026-04-15.0/places.pmtiles'
 
 // Confidence color ramp (conf_mean 0-1, 1 = stable)
 export const COLORS = {
