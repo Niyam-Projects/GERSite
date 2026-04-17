@@ -85,8 +85,8 @@ health_care,diagnostic_service,laboratory,Other Healthcare
 health_care,diagnostic_service,,Other Healthcare
 health_care,dialysis_clinic,dialysis,Other Healthcare
 health_care,dialysis_clinic,,Other Healthcare
-health_care,doctor,doctor,Clinic
-health_care,doctor,,Clinic
+health_care,doctor,doctor,Other Healthcare
+health_care,doctor,,Other Healthcare
 health_care,emergency_room,emergency_room,Other Healthcare
 health_care,emergency_room,,Other Healthcare
 health_care,eye_care_clinic,eye_care_clinic,Eye Care
@@ -245,10 +245,7 @@ community_and_government,social_or_community_service,community_centre,Community 
 community_and_government,social_or_community_service,,Community Center
 community_and_government,,,Community Center
 cultural_and_historic,cultural_center,,Community Center
-cultural_and_historic,historic_site,,Museum
 cultural_and_historic,memorial_site,cemetery,Cemetery
-cultural_and_historic,memorial_site,monument,Museum
-cultural_and_historic,memorial_site,,Museum
 cultural_and_historic,place_of_worship,,Place of Worship
 cultural_and_historic,religious_organization,,Place of Worship
 cultural_and_historic,,,Other Amenity

@@ -170,20 +170,19 @@ office,research,Other Professional
 office,security,Other Professional
 office,tax_advisor,Other Professional
 office,telecommunication,Other Professional
-craft,beekeeper,Home Service
 craft,brewery,Bar
 craft,builder,Home Service
 craft,carpenter,Home Service
 craft,caterer,Bakery
 craft,cleaning,Home Service
 craft,confectionery,Bakery
-craft,dressmaker,Home Service
+craft,dressmaker,Clothing Store
 craft,electrician,Home Service
 craft,electronics_repair,Specialty Store
 craft,gardener,Home Service
 craft,glaziery,Home Service
 craft,grinding_mill,Specialty Store
-craft,handicraft,Home Service
+craft,handicraft,Specialty Store
 craft,hvac,Home Service
 craft,joiner,Home Service
 craft,key_cutter,Home Service
@@ -195,36 +194,10 @@ craft,roofer,Home Service
 craft,sawmill,Specialty Store
 craft,shoemaker,Specialty Store
 craft,stonemason,Home Service
-craft,tailor,Specialty Store
+craft,tailor,Clothing Store
 craft,upholsterer,Home Service
 craft,window_construction,Home Service
 craft,winery,Bar
-historic,aircraft,Museum
-historic,archaeological_site,Museum
-historic,boundary_stone,Museum
-historic,building,Museum
-historic,cannon,Museum
-historic,castle,Museum
-historic,charcoal_pile,Museum
-historic,church,Place of Worship
-historic,city_gate,Museum
-historic,citywalls,Museum
-historic,fort,Museum
-historic,heritage,Museum
-historic,house,Museum
-historic,manor,Museum
-historic,memorial,Museum
-historic,milestone,Museum
-historic,mine,Museum
-historic,mine_shaft,Museum
-historic,monument,Museum
-historic,railway,Museum
-historic,ruins,Museum
-historic,shieling,Museum
-historic,tomb,Museum
-historic,wayside_cross,Place of Worship
-historic,wayside_shrine,Place of Worship
-historic,wreck,Museum
 landuse,cemetery,Cemetery
 landuse,religious,Place of Worship
 amenity,*,Other Amenity
@@ -233,5 +206,4 @@ shop,*,Other Shop
 leisure,*,Recreation
 tourism,*,Other Amenity
 office,*,Other Professional
-craft,*,Home Service
 historic,*,Museum
