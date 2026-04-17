@@ -47,6 +47,7 @@ import pyarrow.parquet as pq
 from config_versioned import Config
 from shapely.geometry import box
 
+from openpois.conflation.chunking import extract_centroids_lonlat
 from openpois.conflation.match import (
     compute_match_scores,
     find_and_score_matches_chunked,
@@ -70,6 +71,45 @@ from openpois.conflation.taxonomy import (
     load_overture_crosswalk,
     load_top_level_matches,
 )
+
+
+# -----------------------------------------------------------------
+# Memory instrumentation
+# -----------------------------------------------------------------
+
+_RSS_T0 = time.time()
+
+
+def _read_proc_status() -> dict[str, int]:
+    """Return VmRSS and VmHWM in bytes from /proc/self/status (Linux)."""
+    out: dict[str, int] = {}
+    try:
+        with open("/proc/self/status", "r") as f:
+            for line in f:
+                if line.startswith(("VmRSS:", "VmHWM:")):
+                    key, val, unit = line.split()
+                    out[key.rstrip(":")] = int(val) * 1024
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def log_rss(label: str) -> None:
+    """Print current RSS and peak RSS at a phase boundary.
+
+    Forces a gc.collect() first so the report reflects retained
+    memory, not pending garbage. Cheap to call (~few ms).
+    """
+    gc.collect()
+    info = _read_proc_status()
+    rss = info.get("VmRSS", 0) / 2**30
+    hwm = info.get("VmHWM", 0) / 2**30
+    elapsed = time.time() - _RSS_T0
+    print(
+        f"  [RSS {rss:5.2f} GB | peak {hwm:5.2f} GB | "
+        f"+{elapsed:6.0f}s] {label}",
+        flush = True,
+    )
 
 
 # -----------------------------------------------------------------
@@ -109,6 +149,17 @@ OSM_MATCH_COLS = [
 OVERTURE_MATCH_COLS = [
     "overture_id", "taxonomy_l0", "taxonomy_l1", "taxonomy_l2",
     "overture_name", "brand_name", "confidence", "geometry",
+]
+# Columns needed downstream by ``build_merge_parts*``. Reloaded into
+# memory after the chunked matcher returns so the matching phase can
+# run without the full source GeoDataFrames resident.
+OSM_MERGE_COLS = [
+    "osm_id", "name", "brand",
+    "conf_mean", "conf_lower", "conf_upper", "geometry",
+]
+OVERTURE_MERGE_COLS = [
+    "overture_id", "overture_name", "brand_name",
+    "confidence", "geometry",
 ]
 
 
@@ -169,15 +220,19 @@ if __name__ == "__main__":
 
     test_bbox = TEST_BBOX if args.test else None
 
+    log_rss("startup")
+
     # -- Load data -------------------------------------------------
     osm_gdf = _load_gdf(
         OSM_PATH, OSM_MATCH_COLS,
         test_bbox = test_bbox, label = "OSM rated",
     )
+    log_rss("after OSM load")
     overture_gdf = _load_gdf(
         OVERTURE_PATH, OVERTURE_MATCH_COLS,
         test_bbox = test_bbox, label = "Overture",
     )
+    log_rss("after Overture load")
 
     # -- Taxonomy assignment ---------------------------------------
     print("\nAssigning shared labels ...")
@@ -225,7 +280,8 @@ if __name__ == "__main__":
     for col in ["taxonomy_l0", "taxonomy_l1", "taxonomy_l2"]:
         if col in overture_gdf.columns:
             overture_gdf.drop(columns = col, inplace = True)
-    gc.collect()
+    del osm_crosswalk, overture_crosswalk, top_level_matches
+    log_rss("after taxonomy assignment + tag-col drop")
 
     # -- Matching --------------------------------------------------
     # Prepare name/brand arrays once (used by both code paths).
@@ -313,9 +369,23 @@ if __name__ == "__main__":
             f"(target ~{CHUNK_TARGET_POIS:,} POIs/chunk, "
             f"max {MAX_RADIUS_M}m) ..."
         )
+
+        # Precompute centroids before freeing the source frames so
+        # the matching phase never holds the full GeoDataFrames in
+        # memory. Geometries are reloaded from disk for the merge.
+        print("  Precomputing centroids ...")
+        osm_centroids_lonlat = extract_centroids_lonlat(
+            np.asarray(osm_gdf.geometry.values)
+        )
+        overture_centroids_lonlat = extract_centroids_lonlat(
+            np.asarray(overture_gdf.geometry.values)
+        )
+        del osm_gdf, overture_gdf
+        log_rss("after dropping gdfs (centroids extracted)")
+
         matches, chunk_summary = find_and_score_matches_chunked(
-            osm_geom = osm_gdf.geometry.values,
-            overture_geom = overture_gdf.geometry.values,
+            osm_centroids_lonlat = osm_centroids_lonlat,
+            overture_centroids_lonlat = overture_centroids_lonlat,
             osm_radii_m = osm_radii,
             osm_shared_labels = osm_shared_labels,
             overture_shared_labels = overture_shared_labels,
@@ -335,12 +405,14 @@ if __name__ == "__main__":
             chunk_size = CHUNK_SIZE,
             checkpoint_dir = checkpoint_dir,
         )
+        del osm_centroids_lonlat, overture_centroids_lonlat
         print(
             f"  Selected {len(matches):,} one-to-one matches "
             f"across {chunk_summary['n_chunks']} chunks "
             f"(Overture dedup drops: "
             f"{chunk_summary['n_overture_dedup_drops']:,})"
         )
+        log_rss("after chunked matching + dedup")
 
     del osm_names, osm_brands
     del overture_names, overture_brands
@@ -370,6 +442,21 @@ if __name__ == "__main__":
     n_matches = len(matches)
 
     if chunk_summary is not None:
+        # Reload only the columns the merge needs — the matching
+        # phase has already returned the dedup-resolved matches, so
+        # we no longer need the wide load schema.
+        print("  Reloading source frames for merge ...")
+        osm_gdf = _load_gdf(
+            OSM_PATH, OSM_MERGE_COLS,
+            test_bbox = test_bbox, label = "OSM (merge cols)",
+        )
+        overture_gdf = _load_gdf(
+            OVERTURE_PATH, OVERTURE_MERGE_COLS,
+            test_bbox = test_bbox,
+            label = "Overture (merge cols)",
+        )
+        log_rss("after reload for merge")
+
         part_paths = build_merge_parts_chunked(
             osm_gdf = osm_gdf,
             overture_gdf = overture_gdf,
@@ -395,11 +482,12 @@ if __name__ == "__main__":
     del osm_gdf, overture_gdf, matches
     del osm_shared_labels, overture_shared_labels, osm_radii
     del osm_l0_bits, overture_l0_bits
-    gc.collect()
+    log_rss("after merge parts written")
 
     # -- Save ------------------------------------------------------
     print("\nSaving conflated dataset ...")
     n_total = save_conflated_from_parts(part_paths, OUTPUT_PATH)
+    log_rss("after final parquet stream")
     config.write_self("conflation")
 
     # Clear chunk checkpoints after a successful save.
