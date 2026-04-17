@@ -194,7 +194,7 @@ class TestDownloadOvertureSnapshot:
              ):
             gdf = download_overture_snapshot(
                 output_path=output,
-                taxonomy_l0_categories=["eat_and_drink"],
+                taxonomy_allowlist=[("eat_and_drink", None)],
                 boundary_gdf=boundary_gdf,
                 coarse_bboxes=coarse_bboxes,
                 bucket="overturemaps-us-west-2",
@@ -247,7 +247,7 @@ class TestDownloadOvertureSnapshot:
         ):
             download_overture_snapshot(
                 output_path=output,
-                taxonomy_l0_categories=["eat_and_drink"],
+                taxonomy_allowlist=[("eat_and_drink", None)],
                 boundary_gdf=_rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
                 coarse_bboxes=[
                     {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}

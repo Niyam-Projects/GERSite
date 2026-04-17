@@ -19,6 +19,9 @@ import pyarrow.parquet as pq
 import pytest
 
 from openpois.io.osm_history_pbf import (
+    CHANGES_SCHEMA,
+    VERSIONS_SCHEMA,
+    _concat_history,
     _diff_tag_sets,
     _tag_set_for_version,
     download_history_pbf,
@@ -26,6 +29,7 @@ from openpois.io.osm_history_pbf import (
     parse_history_pbf,
     time_filter_history_pbf,
 )
+import pyarrow as pa
 
 
 # ---------------------------------------------------------------------------
@@ -488,3 +492,151 @@ class TestParseHistoryPbf:
                 verbose=False,
             )
         mock_fp.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _concat_history cross-extract dedup
+# ---------------------------------------------------------------------------
+
+
+def _write_versions(path, rows):
+    tbl = pa.table(
+        {f.name: [r.get(f.name) for r in rows] for f in VERSIONS_SCHEMA},
+        schema=VERSIONS_SCHEMA,
+    )
+    pq.write_table(tbl, path)
+
+
+def _write_changes(path, rows):
+    tbl = pa.table(
+        {f.name: [r.get(f.name) for r in rows] for f in CHANGES_SCHEMA},
+        schema=CHANGES_SCHEMA,
+    )
+    pq.write_table(tbl, path)
+
+
+class TestConcatHistory:
+    """Cover US+PR concat with dropping of cross-extract duplicates."""
+
+    def test_drops_pr_copy_of_shared_type_id(self, tmp_path):
+        # Same (type, id) = ('node', 10) appears in both US and PR
+        us_v = tmp_path / "us_v.parquet"
+        pr_v = tmp_path / "pr_v.parquet"
+        out_v = tmp_path / "out_v.parquet"
+        us_c = tmp_path / "us_c.parquet"
+        pr_c = tmp_path / "pr_c.parquet"
+        out_c = tmp_path / "out_c.parquet"
+
+        _write_versions(us_v, [
+            {"id": 10, "version": 1, "changeset": 1, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},
+            {"id": 20, "version": 1, "changeset": 2, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},
+        ])
+        _write_versions(pr_v, [
+            {"id": 10, "version": 1, "changeset": 1, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},  # duplicate of US
+            {"id": 30, "version": 1, "changeset": 3, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "way"},
+        ])
+        _write_changes(us_c, [
+            {"key": "amenity", "value": "cafe", "change": "Added",
+             "id": 10, "version": 1, "type": "node"},
+            {"key": "amenity", "value": "bar", "change": "Added",
+             "id": 20, "version": 1, "type": "node"},
+        ])
+        _write_changes(pr_c, [
+            {"key": "amenity", "value": "cafe", "change": "Added",
+             "id": 10, "version": 1, "type": "node"},  # duplicate
+            {"key": "shop", "value": "gift", "change": "Added",
+             "id": 30, "version": 1, "type": "way"},
+        ])
+
+        _concat_history(
+            us_versions_path=us_v,
+            pr_versions_path=pr_v,
+            out_versions_path=out_v,
+            us_changes_path=us_c,
+            pr_changes_path=pr_c,
+            out_changes_path=out_c,
+        )
+
+        v = pd.read_parquet(out_v)
+        c = pd.read_parquet(out_c)
+        assert sorted(zip(v["type"], v["id"])) == [
+            ("node", 10), ("node", 20), ("way", 30)
+        ]
+        # (type, id, version, key) must be unique — the dedup invariant that
+        # format_observations.py depends on
+        assert c.groupby(["type", "id", "version", "key"]).size().max() == 1
+        assert sorted(zip(c["type"], c["id"])) == [
+            ("node", 10), ("node", 20), ("way", 30)
+        ]
+
+    def test_keeps_node_and_way_with_same_integer_id(self, tmp_path):
+        # Regression: OSM ids are type-scoped. A node and a way both with
+        # id=100 must be kept as separate POIs, not deduped together.
+        us_v = tmp_path / "us_v.parquet"
+        pr_v = tmp_path / "pr_v.parquet"
+        out_v = tmp_path / "out_v.parquet"
+        us_c = tmp_path / "us_c.parquet"
+        pr_c = tmp_path / "pr_c.parquet"
+        out_c = tmp_path / "out_c.parquet"
+        _write_versions(us_v, [
+            {"id": 100, "version": 1, "changeset": 1, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},
+            {"id": 100, "version": 1, "changeset": 2, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "way"},
+        ])
+        _write_versions(pr_v, [])  # PR has no rows at all
+        _write_changes(us_c, [
+            {"key": "amenity", "value": "cafe", "change": "Added",
+             "id": 100, "version": 1, "type": "node"},
+            {"key": "leisure", "value": "park", "change": "Added",
+             "id": 100, "version": 1, "type": "way"},
+        ])
+        _write_changes(pr_c, [])
+        _concat_history(
+            us_versions_path=us_v, pr_versions_path=pr_v,
+            out_versions_path=out_v,
+            us_changes_path=us_c, pr_changes_path=pr_c,
+            out_changes_path=out_c,
+        )
+        v = pd.read_parquet(out_v)
+        c = pd.read_parquet(out_c)
+        assert sorted(zip(v["type"], v["id"])) == [("node", 100), ("way", 100)]
+        assert sorted(zip(c["type"], c["key"])) == [
+            ("node", "amenity"), ("way", "leisure")
+        ]
+
+    def test_no_overlap_is_pure_concat(self, tmp_path):
+        us_v = tmp_path / "us_v.parquet"
+        pr_v = tmp_path / "pr_v.parquet"
+        out_v = tmp_path / "out_v.parquet"
+        us_c = tmp_path / "us_c.parquet"
+        pr_c = tmp_path / "pr_c.parquet"
+        out_c = tmp_path / "out_c.parquet"
+        _write_versions(us_v, [
+            {"id": 1, "version": 1, "changeset": 1, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},
+        ])
+        _write_versions(pr_v, [
+            {"id": 2, "version": 1, "changeset": 2, "timestamp": "t",
+             "user": "u", "uid": 1, "type": "node"},
+        ])
+        _write_changes(us_c, [
+            {"key": "amenity", "value": "a", "change": "Added",
+             "id": 1, "version": 1, "type": "node"},
+        ])
+        _write_changes(pr_c, [
+            {"key": "amenity", "value": "b", "change": "Added",
+             "id": 2, "version": 1, "type": "node"},
+        ])
+        _concat_history(
+            us_versions_path=us_v, pr_versions_path=pr_v,
+            out_versions_path=out_v,
+            us_changes_path=us_c, pr_changes_path=pr_c,
+            out_changes_path=out_c,
+        )
+        assert len(pd.read_parquet(out_v)) == 2
+        assert len(pd.read_parquet(out_c)) == 2

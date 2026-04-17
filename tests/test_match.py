@@ -188,8 +188,8 @@ class TestTypeScoring:
         scores = compute_type_scores(
             osm_shared_labels = np.array(["Restaurant"]),
             overture_shared_labels = np.array(["Restaurant"]),
-            osm_l0_bits = np.array([3], dtype = np.uint8),
-            overture_l0_bits = np.array([2], dtype = np.uint8),
+            osm_l0_bits = np.array([3], dtype = np.uint16),
+            overture_l0_bits = np.array([2], dtype = np.uint16),
             osm_idx = np.array([0]),
             overture_idx = np.array([0]),
         )
@@ -200,8 +200,8 @@ class TestTypeScoring:
         scores = compute_type_scores(
             osm_shared_labels = np.array(["Restaurant"]),
             overture_shared_labels = np.array(["Cafe"]),
-            osm_l0_bits = np.array([3], dtype = np.uint8),
-            overture_l0_bits = np.array([2], dtype = np.uint8),
+            osm_l0_bits = np.array([3], dtype = np.uint16),
+            overture_l0_bits = np.array([2], dtype = np.uint16),
             osm_idx = np.array([0]),
             overture_idx = np.array([0]),
         )
@@ -212,8 +212,8 @@ class TestTypeScoring:
         scores = compute_type_scores(
             osm_shared_labels = np.array(["Restaurant"]),
             overture_shared_labels = np.array(["Park"]),
-            osm_l0_bits = np.array([3], dtype = np.uint8),
-            overture_l0_bits = np.array([16], dtype = np.uint8),
+            osm_l0_bits = np.array([3], dtype = np.uint16),
+            overture_l0_bits = np.array([16], dtype = np.uint16),
             osm_idx = np.array([0]),
             overture_idx = np.array([0]),
         )
@@ -224,8 +224,8 @@ class TestTypeScoring:
         scores = compute_type_scores(
             osm_shared_labels = np.array([""]),
             overture_shared_labels = np.array(["Restaurant"]),
-            osm_l0_bits = np.array([0], dtype = np.uint8),
-            overture_l0_bits = np.array([2], dtype = np.uint8),
+            osm_l0_bits = np.array([0], dtype = np.uint16),
+            overture_l0_bits = np.array([2], dtype = np.uint16),
             osm_idx = np.array([0]),
             overture_idx = np.array([0]),
         )
