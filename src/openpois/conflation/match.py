@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import gc
 import re
+import tempfile
 import time
 import warnings
 from pathlib import Path
 
+import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import shapely
 from rapidfuzz import fuzz
 from sklearn.neighbors import BallTree
@@ -463,6 +466,26 @@ def select_best_matches(
 # -----------------------------------------------------------------
 
 
+_MATCH_PART_DTYPES = {
+    "osm_idx": np.int32,
+    "overture_idx": np.int32,
+    "distance_m": np.float32,
+    "distance_score": np.float32,
+    "name_score": np.float32,
+    "type_score": np.float32,
+    "identifier_score": np.float32,
+    "composite_score": np.float32,
+}
+
+
+def _empty_match_part() -> pd.DataFrame:
+    """Empty DataFrame with the canonical match-part schema/dtypes."""
+    return pd.DataFrame(
+        {col: np.array([], dtype = dt)
+         for col, dt in _MATCH_PART_DTYPES.items()}
+    )
+
+
 def _match_one_chunk(
     chunk: ChunkSpec,
     osm_centroids_lonlat: np.ndarray,
@@ -470,8 +493,6 @@ def _match_one_chunk(
     osm_centroids_rad: np.ndarray,
     overture_centroids_rad: np.ndarray,
     osm_primary: np.ndarray,
-    osm_geom: np.ndarray,
-    overture_geom: np.ndarray,
     osm_radii_m: np.ndarray,
     osm_shared_labels: np.ndarray,
     overture_shared_labels: np.ndarray,
@@ -495,8 +516,11 @@ def _match_one_chunk(
 
     Caller passes full-dataset arrays; this function subsets them via
     each chunk's buffered bbox and remaps the resulting local indices
-    back to global. Returned DataFrame has the ``_MATCH_PART_COLS``
-    schema or is empty.
+    back to global. Returned DataFrame has the
+    ``_MATCH_PART_DTYPES`` schema (int32 indices, float32 scores) or
+    is empty. Geometries are not needed — centroids carry the spatial
+    information, so the caller can free heavy GeoDataFrames before
+    invoking this.
     """
     osm_mask = bbox_mask(osm_centroids_lonlat, chunk.buffered_bbox)
     ov_mask = bbox_mask(
@@ -506,23 +530,8 @@ def _match_one_chunk(
     ov_global_idx = np.where(ov_mask)[0]
 
     if len(osm_global_idx) == 0 or len(ov_global_idx) == 0:
-        return pd.DataFrame(
-            {col: [] for col in _MATCH_PART_COLS}
-        ).astype(
-            {
-                "osm_idx": np.int64,
-                "overture_idx": np.int64,
-                "distance_m": np.float64,
-                "distance_score": np.float64,
-                "name_score": np.float64,
-                "type_score": np.float64,
-                "identifier_score": np.float64,
-                "composite_score": np.float64,
-            }
-        )
+        return _empty_match_part()
 
-    osm_geom_sub = osm_geom[osm_global_idx]
-    ov_geom_sub = overture_geom[ov_global_idx]
     osm_rad_sub = osm_centroids_rad[osm_global_idx]
     ov_rad_sub = overture_centroids_rad[ov_global_idx]
     osm_radii_sub = osm_radii_m[osm_global_idx]
@@ -536,8 +545,8 @@ def _match_one_chunk(
     ov_brands_sub = overture_brands[ov_global_idx]
 
     candidates = find_spatial_candidates(
-        osm_geom = osm_geom_sub,
-        overture_geom = ov_geom_sub,
+        osm_geom = None,
+        overture_geom = None,
         osm_radii_m = osm_radii_sub,
         max_radius_m = max_radius_m,
         chunk_size = chunk_size,
@@ -545,9 +554,7 @@ def _match_one_chunk(
         overture_centroids_rad = ov_rad_sub,
     )
     if candidates.empty:
-        return pd.DataFrame(
-            {col: [] for col in _MATCH_PART_COLS}
-        )
+        return _empty_match_part()
 
     scored = compute_match_scores(
         candidates = candidates,
@@ -570,9 +577,7 @@ def _match_one_chunk(
         scored, min_score = min_match_score,
     )
     if local_matches.empty:
-        return pd.DataFrame(
-            {col: [] for col in _MATCH_PART_COLS}
-        )
+        return _empty_match_part()
 
     # Remap local indices to global
     osm_global = osm_global_idx[
@@ -587,34 +592,93 @@ def _match_one_chunk(
     keep = osm_primary[osm_global] == chunk.chunk_id
     result = pd.DataFrame(
         {
-            "osm_idx": osm_global[keep].astype(np.int64),
-            "overture_idx": ov_global[keep].astype(np.int64),
+            "osm_idx": osm_global[keep].astype(np.int32),
+            "overture_idx": ov_global[keep].astype(np.int32),
             "distance_m": local_matches["distance_m"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
             "distance_score": local_matches["distance_score"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
             "name_score": local_matches["name_score"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
             "type_score": local_matches["type_score"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
             "identifier_score": local_matches["identifier_score"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
             "composite_score": local_matches["composite_score"]
             .to_numpy()[keep]
-            .astype(np.float64),
+            .astype(np.float32),
         }
     )
     return result
 
 
+def _dedup_chunk_parquets(
+    checkpoint_dir: Path,
+    duckdb_memory_limit: str = "4GB",
+) -> pd.DataFrame:
+    """
+    Stream-dedup chunk match parquets via DuckDB.
+
+    Scans every ``chunk_*.parquet`` under ``checkpoint_dir``, ranks
+    rows by ``(composite_score DESC, distance_m ASC, osm_idx ASC)``
+    within each ``overture_idx``, and returns the top row per group.
+    Uses a bounded DuckDB memory limit so spilling is preferred over
+    OOMing — much cheaper than pandas concat + sort + drop_duplicates
+    over hundreds of part files.
+
+    Returns an empty DataFrame with the canonical match-part schema
+    if no parquet rows exist.
+    """
+    glob_pattern = str(checkpoint_dir / "chunk_*.parquet")
+    con = duckdb.connect()
+    try:
+        con.execute(f"SET memory_limit = '{duckdb_memory_limit}'")
+        # Probe row count first so we can short-circuit on empty input
+        # (read_parquet errors on a glob that matches no files, but a
+        # parquet with zero rows is fine).
+        n_total = con.execute(
+            f"SELECT COUNT(*) FROM read_parquet('{glob_pattern}')"
+        ).fetchone()[0]
+        if n_total == 0:
+            return _empty_match_part()
+
+        deduped = con.execute(
+            f"""
+            SELECT osm_idx, overture_idx, distance_m,
+                   distance_score, name_score, type_score,
+                   identifier_score, composite_score
+            FROM (
+                SELECT *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY overture_idx
+                        ORDER BY composite_score DESC,
+                                 distance_m ASC,
+                                 osm_idx ASC
+                    ) AS _rn
+                FROM read_parquet('{glob_pattern}')
+            )
+            WHERE _rn = 1
+            """
+        ).fetch_df()
+    finally:
+        con.close()
+
+    # Restore canonical narrow dtypes (DuckDB → pandas may widen).
+    for col, dt in _MATCH_PART_DTYPES.items():
+        if col in deduped.columns:
+            deduped[col] = deduped[col].astype(dt)
+    return deduped
+
+
 def find_and_score_matches_chunked(
-    osm_geom,
-    overture_geom,
+    osm_geom = None,
+    overture_geom = None,
+    *,
     osm_radii_m: np.ndarray,
     osm_shared_labels: np.ndarray,
     overture_shared_labels: np.ndarray,
@@ -633,6 +697,9 @@ def find_and_score_matches_chunked(
     chunk_target_pois: int,
     chunk_size: int = 500_000,
     checkpoint_dir: Path | None = None,
+    osm_centroids_lonlat: np.ndarray | None = None,
+    overture_centroids_lonlat: np.ndarray | None = None,
+    duckdb_memory_limit: str = "4GB",
 ) -> tuple[pd.DataFrame, dict]:
     """
     Spatially chunked matching driver.
@@ -645,35 +712,56 @@ def find_and_score_matches_chunked(
       primary chunk equal to the current chunk (``osm-anchored emit``
       rule). This guarantees each matched pair is emitted at most
       once across the whole run.
-    - After concatenating, Overture POIs are deduplicated by keeping
-      the row with the highest ``composite_score``; ties broken by
-      lowest ``distance_m`` then lowest ``osm_idx``. The loser's OSM
-      POI falls through to unmatched via the downstream merge.
+    - Each chunk's matches are streamed to a parquet file under
+      ``checkpoint_dir``; nothing is kept in a Python list. After all
+      chunks finish, DuckDB scans the parquet glob and runs the
+      per-Overture max-score dedup with a bounded memory budget so
+      peak RSS stays small even for hundreds of chunks.
     - A safety assertion verifies each ``osm_idx`` appears at most
-      once.
+      once after dedup.
 
-    If ``checkpoint_dir`` is set, each chunk's filtered matches are
-    written to ``chunk_NNNN.parquet`` before being held in memory.
-    On restart, any chunk whose part file already exists is loaded
-    instead of re-run.
+    Geometry is not needed when centroids are supplied: callers can
+    free the source GeoDataFrames before invoking this function and
+    pass ``osm_centroids_lonlat`` / ``overture_centroids_lonlat``
+    directly. If centroids are not provided, they are computed from
+    ``osm_geom`` / ``overture_geom`` (which must then be set).
+
+    If ``checkpoint_dir`` is ``None``, a tempdir is created and
+    cleaned up on exit. Pass an explicit dir to enable resume.
 
     Returns:
-        ``(matches, summary)`` where ``matches`` is a DataFrame
-        compatible with ``select_best_matches`` output (same columns
-        plus ``distance_score``, ``name_score``, etc.) and ``summary``
-        is a dict of observability counters including ``n_chunks``,
+        ``(matches, summary)`` where ``matches`` has the
+        ``_MATCH_PART_DTYPES`` schema and ``summary`` is a dict of
+        observability counters including ``n_chunks``,
         ``min_chunk_pois``, ``max_chunk_pois``, and
-        ``n_overture_dedup_drops``.
+        ``n_overture_dedup_drops``, plus the ``osm_primary`` /
+        ``overture_primary`` arrays the chunked merge needs.
     """
-    osm_geom = np.asarray(osm_geom)
-    overture_geom = np.asarray(overture_geom)
-
     # Centroids computed once, reused for chunking + BallTree queries
-    print("  Precomputing centroids ...")
-    osm_centroids_lonlat = extract_centroids_lonlat(osm_geom)
-    overture_centroids_lonlat = extract_centroids_lonlat(
-        overture_geom
-    )
+    if osm_centroids_lonlat is None:
+        if osm_geom is None:
+            raise ValueError(
+                "Provide either osm_geom or osm_centroids_lonlat."
+            )
+        print("  Precomputing OSM centroids ...")
+        osm_centroids_lonlat = extract_centroids_lonlat(
+            np.asarray(osm_geom)
+        )
+    if overture_centroids_lonlat is None:
+        if overture_geom is None:
+            raise ValueError(
+                "Provide either overture_geom or "
+                "overture_centroids_lonlat."
+            )
+        print("  Precomputing Overture centroids ...")
+        overture_centroids_lonlat = extract_centroids_lonlat(
+            np.asarray(overture_geom)
+        )
+    # Geometry no longer needed past this point — drop refs so the
+    # caller's del + gc.collect can actually free the arrays.
+    osm_geom = None
+    overture_geom = None
+
     osm_centroids_rad = lonlat_to_latlon_rad(osm_centroids_lonlat)
     overture_centroids_rad = lonlat_to_latlon_rad(
         overture_centroids_lonlat
@@ -710,93 +798,95 @@ def find_and_score_matches_chunked(
         f"mean={osm_counts.mean():.0f}"
     )
 
-    if checkpoint_dir is not None:
+    # Always checkpoint to disk: per-chunk parquets are the input to
+    # the DuckDB dedup pass and keep RSS independent of chunk count.
+    cleanup_checkpoint = False
+    if checkpoint_dir is None:
+        checkpoint_dir = Path(
+            tempfile.mkdtemp(prefix = "openpois_chunkmatch_")
+        )
+        cleanup_checkpoint = True
+    else:
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents = True, exist_ok = True)
 
-    part_dfs: list[pd.DataFrame] = []
-    t_chunk_start = time.time()
-    for chunk in chunks:
-        part_path = (
-            checkpoint_dir / f"chunk_{chunk.chunk_id:04d}.parquet"
-            if checkpoint_dir is not None
-            else None
-        )
-        if part_path is not None and part_path.exists():
-            part_dfs.append(pd.read_parquet(part_path))
-            continue
-
-        part = _match_one_chunk(
-            chunk = chunk,
-            osm_centroids_lonlat = osm_centroids_lonlat,
-            overture_centroids_lonlat = overture_centroids_lonlat,
-            osm_centroids_rad = osm_centroids_rad,
-            overture_centroids_rad = overture_centroids_rad,
-            osm_primary = osm_primary,
-            osm_geom = osm_geom,
-            overture_geom = overture_geom,
-            osm_radii_m = osm_radii_m,
-            osm_shared_labels = osm_shared_labels,
-            overture_shared_labels = overture_shared_labels,
-            osm_l0_bits = osm_l0_bits,
-            overture_l0_bits = overture_l0_bits,
-            osm_names = osm_names,
-            osm_brands = osm_brands,
-            overture_names = overture_names,
-            overture_brands = overture_brands,
-            distance_weight = distance_weight,
-            name_weight = name_weight,
-            type_weight = type_weight,
-            identifier_weight = identifier_weight,
-            min_match_score = min_match_score,
-            max_radius_m = max_radius_m,
-            chunk_size = chunk_size,
-        )
-
-        if part_path is not None:
-            part.to_parquet(part_path, compression = "zstd")
-        part_dfs.append(part)
-
-        done = chunk.chunk_id + 1
-        if done % 10 == 0 or done == len(chunks):
-            elapsed = time.time() - t_chunk_start
-            total_matches = sum(len(p) for p in part_dfs)
-            print(
-                f"  Chunk {done}/{len(chunks)}: "
-                f"{total_matches:,} cumulative matches "
-                f"({elapsed:.0f}s)"
+    try:
+        cumulative_matches = 0
+        t_chunk_start = time.time()
+        for chunk in chunks:
+            part_path = (
+                checkpoint_dir
+                / f"chunk_{chunk.chunk_id:04d}.parquet"
             )
+            if part_path.exists():
+                # Resume: count rows for the running tally without
+                # loading the frame into RAM.
+                cumulative_matches += pq.ParquetFile(
+                    part_path
+                ).metadata.num_rows
+            else:
+                part = _match_one_chunk(
+                    chunk = chunk,
+                    osm_centroids_lonlat = osm_centroids_lonlat,
+                    overture_centroids_lonlat = (
+                        overture_centroids_lonlat
+                    ),
+                    osm_centroids_rad = osm_centroids_rad,
+                    overture_centroids_rad = overture_centroids_rad,
+                    osm_primary = osm_primary,
+                    osm_radii_m = osm_radii_m,
+                    osm_shared_labels = osm_shared_labels,
+                    overture_shared_labels = overture_shared_labels,
+                    osm_l0_bits = osm_l0_bits,
+                    overture_l0_bits = overture_l0_bits,
+                    osm_names = osm_names,
+                    osm_brands = osm_brands,
+                    overture_names = overture_names,
+                    overture_brands = overture_brands,
+                    distance_weight = distance_weight,
+                    name_weight = name_weight,
+                    type_weight = type_weight,
+                    identifier_weight = identifier_weight,
+                    min_match_score = min_match_score,
+                    max_radius_m = max_radius_m,
+                    chunk_size = chunk_size,
+                )
+                part.to_parquet(part_path, compression = "zstd")
+                cumulative_matches += len(part)
+                del part
+                gc.collect()
+
+            done = chunk.chunk_id + 1
+            if done % 10 == 0 or done == len(chunks):
+                elapsed = time.time() - t_chunk_start
+                print(
+                    f"  Chunk {done}/{len(chunks)}: "
+                    f"{cumulative_matches:,} cumulative matches "
+                    f"({elapsed:.0f}s)"
+                )
+
+        # Free chunk-loop transients before opening DuckDB.
+        del osm_centroids_rad, overture_centroids_rad
         gc.collect()
 
-    global_matches = (
-        pd.concat(part_dfs, ignore_index = True)
-        if part_dfs
-        else pd.DataFrame(
-            {col: [] for col in _MATCH_PART_COLS}
+        print("  Deduplicating chunk matches via DuckDB ...")
+        global_matches = _dedup_chunk_parquets(
+            checkpoint_dir,
+            duckdb_memory_limit = duckdb_memory_limit,
         )
+    finally:
+        if cleanup_checkpoint:
+            for p in checkpoint_dir.glob("chunk_*.parquet"):
+                p.unlink()
+            checkpoint_dir.rmdir()
+
+    n_overture_dedup_drops = (
+        cumulative_matches - len(global_matches)
     )
-    del part_dfs
-    gc.collect()
 
-    n_before_dedup = len(global_matches)
-
-    # Per-Overture max-score dedup (see docstring for rationale).
-    if not global_matches.empty:
-        global_matches = global_matches.sort_values(
-            by = [
-                "composite_score",
-                "distance_m",
-                "osm_idx",
-            ],
-            ascending = [False, True, True],
-            kind = "stable",
-        ).drop_duplicates(
-            subset = "overture_idx", keep = "first",
-        ).reset_index(drop = True)
-
-    n_overture_dedup_drops = n_before_dedup - len(global_matches)
-
-    if not global_matches["osm_idx"].is_unique:
+    if not global_matches.empty and not global_matches[
+        "osm_idx"
+    ].is_unique:
         dup_count = int(
             (global_matches["osm_idx"].duplicated()).sum()
         )
