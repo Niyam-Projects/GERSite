@@ -185,9 +185,13 @@ if __name__ == "__main__":
         )
         fig_save(fig, stub = f"osm_changes_{TAG_KEY}_all_preds")
 
-    # Create multi-panel plots for the top tags in each OSM category
+    # Create multi-panel plots for the top tags in each OSM category. Only
+    # iterate keys that are actually columns in the observations CSV — the
+    # snapshot pipeline's filter_keys list can expand without the observations
+    # CSV being regenerated, so we defend against the mismatch here.
     TOP_N_TYPES = config.get("osm_data", "top_n_types")
-    for subtype in OSM_KEYS:
+    present_keys = [k for k in OSM_KEYS if k in to_plot_df.columns]
+    for subtype in present_keys:
         fig = change_multiplot_create(
             observations = to_plot_df,
             col = subtype,
