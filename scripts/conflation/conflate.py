@@ -37,7 +37,9 @@ from __future__ import annotations
 
 import argparse
 import gc
+import shutil
 import time
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -47,11 +49,15 @@ from shapely.geometry import box
 
 from openpois.conflation.match import (
     compute_match_scores,
+    find_and_score_matches_chunked,
     find_spatial_candidates,
     select_best_matches,
 )
+
+CHECKPOINT_SUBDIR = "chunk_matches"
 from openpois.conflation.merge import (
     build_merge_parts,
+    build_merge_parts_chunked,
     save_conflated_from_parts,
 )
 from openpois.conflation.taxonomy import (
@@ -89,6 +95,9 @@ NAME_WEIGHT = config.get("conflation", "name_weight")
 TYPE_WEIGHT = config.get("conflation", "type_weight")
 IDENTIFIER_WEIGHT = config.get("conflation", "identifier_weight")
 CHUNK_SIZE = config.get("conflation", "chunk_size")
+CHUNK_TARGET_POIS = config.get(
+    "conflation", "chunk_target_pois",
+)
 TEST_BBOX = config.get("conflation", "test_bbox")
 
 # Columns needed for matching (memory optimization)
@@ -144,6 +153,15 @@ if __name__ == "__main__":
         help = (
             "Filter both datasets to a small bbox "
             "(Seattle area) for testing."
+        ),
+    )
+    parser.add_argument(
+        "--no-chunk",
+        action = "store_true",
+        help = (
+            "Disable spatial chunking and run matching over the "
+            "full dataset in one pass. Uses more memory; kept as "
+            "a debug/baseline option."
         ),
     )
     args = parser.parse_args()
@@ -209,75 +227,135 @@ if __name__ == "__main__":
             overture_gdf.drop(columns = col, inplace = True)
     gc.collect()
 
-    # -- Spatial candidates ----------------------------------------
-    print(f"\nFinding spatial candidates (max {MAX_RADIUS_M}m) ...")
-    candidates = find_spatial_candidates(
-        osm_geom = osm_gdf.geometry.values,
-        overture_geom = overture_gdf.geometry.values,
-        osm_radii_m = osm_radii,
-        max_radius_m = MAX_RADIUS_M,
-        chunk_size = CHUNK_SIZE,
+    # -- Matching --------------------------------------------------
+    # Prepare name/brand arrays once (used by both code paths).
+    osm_names = osm_gdf["name"].to_numpy()
+    osm_brands = (
+        osm_gdf["brand"].to_numpy()
+        if "brand" in osm_gdf.columns
+        else np.full(len(osm_gdf), None, dtype = object)
     )
-    print(f"  Found {len(candidates):,} candidate pairs")
-    gc.collect()
-
-    if candidates.empty:
-        print("No spatial candidates found. Merging all as unmatched.")
-        matches = candidates
-    else:
-        # -- Scoring -----------------------------------------------
-        print("\nScoring candidates ...")
-        osm_names = osm_gdf["name"].to_numpy()
-        osm_brands = (
-            osm_gdf["brand"].to_numpy()
-            if "brand" in osm_gdf.columns
-            else np.full(len(osm_gdf), None, dtype = object)
+    overture_names = overture_gdf["overture_name"].to_numpy()
+    overture_brands = (
+        overture_gdf["brand_name"].to_numpy()
+        if "brand_name" in overture_gdf.columns
+        else np.full(
+            len(overture_gdf), None, dtype = object
         )
-        overture_names = overture_gdf["overture_name"].to_numpy()
-        overture_brands = (
-            overture_gdf["brand_name"].to_numpy()
-            if "brand_name" in overture_gdf.columns
-            else np.full(
-                len(overture_gdf), None, dtype = object
+    )
+
+    chunk_summary: dict | None = None
+    checkpoint_dir: Path | None = None
+
+    if args.no_chunk:
+        # -- Non-chunked baseline (full-dataset pipeline) ----------
+        print(
+            f"\nFinding spatial candidates (max {MAX_RADIUS_M}m) ..."
+        )
+        candidates = find_spatial_candidates(
+            osm_geom = osm_gdf.geometry.values,
+            overture_geom = overture_gdf.geometry.values,
+            osm_radii_m = osm_radii,
+            max_radius_m = MAX_RADIUS_M,
+            chunk_size = CHUNK_SIZE,
+        )
+        print(f"  Found {len(candidates):,} candidate pairs")
+        gc.collect()
+
+        if candidates.empty:
+            print(
+                "No spatial candidates found. "
+                "Merging all as unmatched."
             )
-        )
+            matches = candidates
+        else:
+            print("\nScoring candidates ...")
+            scored = compute_match_scores(
+                candidates = candidates,
+                osm_names = osm_names,
+                osm_brands = osm_brands,
+                overture_names = overture_names,
+                overture_brands = overture_brands,
+                osm_shared_labels = osm_shared_labels,
+                overture_shared_labels = overture_shared_labels,
+                osm_radii_m = osm_radii,
+                osm_l0_bits = osm_l0_bits,
+                overture_l0_bits = overture_l0_bits,
+                distance_weight = DISTANCE_WEIGHT,
+                name_weight = NAME_WEIGHT,
+                type_weight = TYPE_WEIGHT,
+                identifier_weight = IDENTIFIER_WEIGHT,
+            )
+            print(
+                f"  Mean composite score: "
+                f"{scored['composite_score'].mean():.3f}"
+            )
 
-        scored = compute_match_scores(
-            candidates = candidates,
+            print(
+                f"\nSelecting best matches "
+                f"(min_score={MIN_MATCH_SCORE}) ..."
+            )
+            matches = select_best_matches(
+                scored, min_score = MIN_MATCH_SCORE,
+            )
+            print(
+                f"  Selected {len(matches):,} one-to-one matches"
+            )
+
+            del scored, candidates
+            gc.collect()
+    else:
+        # -- Chunked driver (default) ------------------------------
+        conflation_dir = Path(OUTPUT_PATH).parent
+        checkpoint_dir = conflation_dir / CHECKPOINT_SUBDIR
+        print(
+            f"\nRunning chunked matching "
+            f"(target ~{CHUNK_TARGET_POIS:,} POIs/chunk, "
+            f"max {MAX_RADIUS_M}m) ..."
+        )
+        matches, chunk_summary = find_and_score_matches_chunked(
+            osm_geom = osm_gdf.geometry.values,
+            overture_geom = overture_gdf.geometry.values,
+            osm_radii_m = osm_radii,
+            osm_shared_labels = osm_shared_labels,
+            overture_shared_labels = overture_shared_labels,
+            osm_l0_bits = osm_l0_bits,
+            overture_l0_bits = overture_l0_bits,
             osm_names = osm_names,
             osm_brands = osm_brands,
             overture_names = overture_names,
             overture_brands = overture_brands,
-            osm_shared_labels = osm_shared_labels,
-            overture_shared_labels = overture_shared_labels,
-            osm_radii_m = osm_radii,
-            osm_l0_bits = osm_l0_bits,
-            overture_l0_bits = overture_l0_bits,
             distance_weight = DISTANCE_WEIGHT,
             name_weight = NAME_WEIGHT,
             type_weight = TYPE_WEIGHT,
             identifier_weight = IDENTIFIER_WEIGHT,
+            min_match_score = MIN_MATCH_SCORE,
+            max_radius_m = MAX_RADIUS_M,
+            chunk_target_pois = CHUNK_TARGET_POIS,
+            chunk_size = CHUNK_SIZE,
+            checkpoint_dir = checkpoint_dir,
         )
         print(
-            f"  Mean composite score: "
-            f"{scored['composite_score'].mean():.3f}"
+            f"  Selected {len(matches):,} one-to-one matches "
+            f"across {chunk_summary['n_chunks']} chunks "
+            f"(Overture dedup drops: "
+            f"{chunk_summary['n_overture_dedup_drops']:,})"
         )
 
-        # -- Best matches ------------------------------------------
-        print(
-            f"\nSelecting best matches "
-            f"(min_score={MIN_MATCH_SCORE}) ..."
-        )
-        matches = select_best_matches(
-            scored, min_score = MIN_MATCH_SCORE,
-        )
-        print(f"  Selected {len(matches):,} one-to-one matches")
+    del osm_names, osm_brands
+    del overture_names, overture_brands
+    gc.collect()
 
-        # Free scoring intermediates
-        del scored, candidates
-        del osm_names, osm_brands
-        del overture_names, overture_brands
-        gc.collect()
+    # Drop scoring intermediates the merge doesn't need. Keeps only
+    # the four columns read by ``_build_matched_gdf``.
+    keep_cols = [
+        "osm_idx", "overture_idx",
+        "composite_score", "distance_m",
+    ]
+    matches = matches[
+        [c for c in keep_cols if c in matches.columns]
+    ].reset_index(drop = True)
+    gc.collect()
 
     # -- Merge (disk-backed to limit memory) -----------------------
     print("\nMerging into unified dataset ...")
@@ -291,14 +369,27 @@ if __name__ == "__main__":
     )
     n_matches = len(matches)
 
-    part_paths = build_merge_parts(
-        osm_gdf = osm_gdf,
-        overture_gdf = overture_gdf,
-        matches = matches,
-        osm_shared_labels = osm_shared_labels,
-        overture_shared_labels = overture_shared_labels,
-        overture_confidence_weight = OVERTURE_CONF_WEIGHT,
-    )
+    if chunk_summary is not None:
+        part_paths = build_merge_parts_chunked(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_shared_labels,
+            overture_shared_labels = overture_shared_labels,
+            osm_primary = chunk_summary["osm_primary"],
+            overture_primary = chunk_summary["overture_primary"],
+            n_chunks = chunk_summary["n_chunks"],
+            overture_confidence_weight = OVERTURE_CONF_WEIGHT,
+        )
+    else:
+        part_paths = build_merge_parts(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_shared_labels,
+            overture_shared_labels = overture_shared_labels,
+            overture_confidence_weight = OVERTURE_CONF_WEIGHT,
+        )
 
     # Free ALL source data before concat+save
     del osm_gdf, overture_gdf, matches
@@ -310,6 +401,10 @@ if __name__ == "__main__":
     print("\nSaving conflated dataset ...")
     n_total = save_conflated_from_parts(part_paths, OUTPUT_PATH)
     config.write_self("conflation")
+
+    # Clear chunk checkpoints after a successful save.
+    if checkpoint_dir is not None and checkpoint_dir.exists():
+        shutil.rmtree(checkpoint_dir)
 
     # -- Summary ---------------------------------------------------
     elapsed = time.time() - t0
@@ -323,5 +418,16 @@ if __name__ == "__main__":
         )
         print(
             f"  Mean match distance: {match_dist_mean:.1f}m"
+        )
+    if chunk_summary is not None:
+        print(
+            f"  Chunks:         {chunk_summary['n_chunks']} "
+            f"(OSM/chunk: "
+            f"{chunk_summary['min_chunk_pois']:,}"
+            f"–{chunk_summary['max_chunk_pois']:,})"
+        )
+        print(
+            f"  Overture dedup drops: "
+            f"{chunk_summary['n_overture_dedup_drops']:,}"
         )
     print(f"  Output: {OUTPUT_PATH}")

@@ -4,10 +4,16 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 from shapely.geometry import MultiPolygon, Point, Polygon
 
-from openpois.conflation.merge import merge_matched_pois
+from openpois.conflation.merge import (
+    build_merge_parts,
+    build_merge_parts_chunked,
+    merge_matched_pois,
+    save_conflated_from_parts,
+)
 
 
 @pytest.fixture
@@ -245,3 +251,362 @@ class TestMergeMatchedPois:
             result["shared_label"] == "Park"
         ].iloc[0]
         assert park_row["shared_label"] == "Park"
+
+
+# -----------------------------------------------------------------
+# Disk-backed row-sliced merge
+# -----------------------------------------------------------------
+
+
+def _read_parts(part_paths):
+    """Concatenate part parquets into a single GeoDataFrame."""
+    dfs = [gpd.read_parquet(p) for p in part_paths]
+    return gpd.GeoDataFrame(
+        pd.concat(dfs, ignore_index = True),
+        crs = dfs[0].crs,
+    )
+
+
+class TestBuildMergeParts:
+    def test_matches_in_memory_result(
+        self, osm_gdf, overture_gdf, matches, tmp_path,
+    ):
+        """Row-sliced merge parts must reconstruct the same GDF as
+        ``merge_matched_pois`` (order may differ; compare as a set)."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        in_mem = merge_matched_pois(
+            osm_gdf, overture_gdf, matches,
+            osm_labels, ov_labels,
+        )
+        paths = build_merge_parts(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            n_slices = 2,
+        )
+        try:
+            disk = _read_parts(paths)
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        assert set(disk.columns) == set(in_mem.columns)
+        assert len(disk) == len(in_mem)
+        assert (
+            set(disk["unified_id"])
+            == set(in_mem["unified_id"])
+        )
+
+    def test_empty_matches(
+        self, osm_gdf, overture_gdf, tmp_path,
+    ):
+        """With zero matches, no matched part is written and all
+        source rows appear as unmatched in the output."""
+        empty = pd.DataFrame(
+            {
+                "osm_idx": pd.array([], dtype = np.int64),
+                "overture_idx": pd.array([], dtype = np.int64),
+                "distance_m": pd.array([], dtype = np.float64),
+                "composite_score": pd.array(
+                    [], dtype = np.float64
+                ),
+            }
+        )
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        paths = build_merge_parts(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = empty,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            n_slices = 3,
+        )
+        try:
+            disk = _read_parts(paths)
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        assert not any(
+            "matched" == str(p.name).split("_")[1]
+            for p in paths
+        )
+        assert len(disk) == len(osm_gdf) + len(overture_gdf)
+        assert set(disk["source"].unique()) == {"osm", "overture"}
+
+    def test_slice_count_produces_expected_parts(
+        self, osm_gdf, overture_gdf, matches,
+    ):
+        """n_slices=3 with 2 unmatched rows on each side yields
+        2 single-row slices per source (empty slices are dropped)."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        paths = build_merge_parts(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            n_slices = 3,
+        )
+        try:
+            names = sorted(p.name for p in paths)
+            # 1 matched + at most 3 osm + at most 3 overture
+            assert names[0] == "1_matched.parquet"
+            osm_parts = [
+                n for n in names if n.startswith("2_")
+            ]
+            ov_parts = [
+                n for n in names if n.startswith("3_")
+            ]
+            assert 1 <= len(osm_parts) <= 3
+            assert 1 <= len(ov_parts) <= 3
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+
+# -----------------------------------------------------------------
+# Disk-backed per-chunk merge
+# -----------------------------------------------------------------
+
+
+class TestBuildMergePartsChunked:
+    def test_matches_in_memory_result(
+        self, osm_gdf, overture_gdf, matches,
+    ):
+        """Per-chunk merge must produce the same unified set as the
+        in-memory ``merge_matched_pois`` when chunking is applied."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+
+        # Assign every row to chunk 0 (trivial single-chunk case).
+        osm_primary = np.zeros(len(osm_gdf), dtype = np.int32)
+        ov_primary = np.zeros(len(overture_gdf), dtype = np.int32)
+
+        in_mem = merge_matched_pois(
+            osm_gdf, overture_gdf, matches,
+            osm_labels, ov_labels,
+        )
+        paths = build_merge_parts_chunked(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            osm_primary = osm_primary,
+            overture_primary = ov_primary,
+            n_chunks = 1,
+        )
+        try:
+            disk = _read_parts(paths)
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        assert len(disk) == len(in_mem)
+        assert (
+            set(disk["unified_id"])
+            == set(in_mem["unified_id"])
+        )
+
+    def test_multi_chunk_partitions_cleanly(
+        self, osm_gdf, overture_gdf, matches,
+    ):
+        """Two chunks: each unified_id appears in exactly one part,
+        and the union equals the in-memory result."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+
+        # OSM rows 0,1 → chunk 0; row 2 → chunk 1.
+        # Overture rows 0 → chunk 0; 1,2 → chunk 1.
+        osm_primary = np.array([0, 0, 1], dtype = np.int32)
+        ov_primary = np.array([0, 1, 1], dtype = np.int32)
+
+        in_mem = merge_matched_pois(
+            osm_gdf, overture_gdf, matches,
+            osm_labels, ov_labels,
+        )
+        paths = build_merge_parts_chunked(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            osm_primary = osm_primary,
+            overture_primary = ov_primary,
+            n_chunks = 2,
+        )
+        try:
+            per_chunk = [gpd.read_parquet(p) for p in paths]
+            disk = gpd.GeoDataFrame(
+                pd.concat(per_chunk, ignore_index = True),
+                crs = per_chunk[0].crs,
+            )
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        assert len(paths) == 2
+        # Disjoint coverage of unified_ids
+        id_sets = [set(df["unified_id"]) for df in per_chunk]
+        assert id_sets[0].isdisjoint(id_sets[1])
+        assert (
+            id_sets[0] | id_sets[1]
+            == set(in_mem["unified_id"])
+        )
+
+    def test_matched_emitted_once_by_osm_primary(
+        self, osm_gdf, overture_gdf, matches,
+    ):
+        """The matched pair (OSM idx 0, Overture idx 0) must be
+        emitted by OSM's primary chunk, not Overture's — even when
+        they disagree."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+
+        osm_primary = np.array([1, 0, 0], dtype = np.int32)
+        ov_primary = np.array([0, 0, 1], dtype = np.int32)
+
+        paths = build_merge_parts_chunked(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            osm_primary = osm_primary,
+            overture_primary = ov_primary,
+            n_chunks = 2,
+        )
+        try:
+            per_chunk = [gpd.read_parquet(p) for p in paths]
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        # Two chunks, both should have parts (OSM 0 in chunk 1,
+        # OSM 1,2 in chunk 0, Overture 0,1 vary).
+        by_chunk = {
+            int(p.name.split("_")[1].split(".")[0]): df
+            for p, df in zip(paths, per_chunk)
+        }
+        matched_chunks = {
+            c for c, df in by_chunk.items()
+            if (df["source"] == "matched").any()
+        }
+        # Matched pair's OSM is at idx 0 → osm_primary[0] = 1.
+        assert matched_chunks == {1}
+
+
+class TestMixedCrsInputs:
+    """OSM and Overture can load with different CRS strings for the
+    same underlying WGS84 lon/lat system ("WGS 84" vs
+    "WGS 84 (CRS84)"). All merge entry points must tolerate that
+    without raising a CRS mismatch."""
+
+    @pytest.fixture
+    def osm_wgs84(self, osm_gdf):
+        return osm_gdf.set_crs(
+            "EPSG:4326", allow_override = True,
+        )
+
+    @pytest.fixture
+    def overture_crs84(self, overture_gdf):
+        return overture_gdf.set_crs(
+            "OGC:CRS84", allow_override = True,
+        )
+
+    def test_merge_matched_pois_handles_mixed_crs(
+        self, osm_wgs84, overture_crs84, matches,
+    ):
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        result = merge_matched_pois(
+            osm_wgs84, overture_crs84, matches,
+            osm_labels, ov_labels,
+        )
+        assert len(result) == 5
+        assert result.crs == osm_wgs84.crs
+
+    def test_build_merge_parts_chunked_handles_mixed_crs(
+        self, osm_wgs84, overture_crs84, matches,
+    ):
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        osm_primary = np.zeros(
+            len(osm_wgs84), dtype = np.int32,
+        )
+        ov_primary = np.zeros(
+            len(overture_crs84), dtype = np.int32,
+        )
+        paths = build_merge_parts_chunked(
+            osm_gdf = osm_wgs84,
+            overture_gdf = overture_crs84,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            osm_primary = osm_primary,
+            overture_primary = ov_primary,
+            n_chunks = 1,
+        )
+        try:
+            disk = gpd.read_parquet(paths[0])
+        finally:
+            for p in paths:
+                p.unlink(missing_ok = True)
+            paths[0].parent.rmdir()
+
+        assert len(disk) == 5
+        assert disk.crs == osm_wgs84.crs
+
+
+class TestSaveConflatedFromParts:
+    def test_streams_multiple_parts(
+        self, osm_gdf, overture_gdf, matches, tmp_path,
+    ):
+        """Streaming writer reconstructs the full GDF from per-chunk
+        parts and returns the correct row count."""
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        osm_primary = np.array([0, 0, 1], dtype = np.int32)
+        ov_primary = np.array([0, 1, 1], dtype = np.int32)
+
+        in_mem = merge_matched_pois(
+            osm_gdf, overture_gdf, matches,
+            osm_labels, ov_labels,
+        )
+        paths = build_merge_parts_chunked(
+            osm_gdf = osm_gdf,
+            overture_gdf = overture_gdf,
+            matches = matches,
+            osm_shared_labels = osm_labels,
+            overture_shared_labels = ov_labels,
+            osm_primary = osm_primary,
+            overture_primary = ov_primary,
+            n_chunks = 2,
+        )
+
+        out = tmp_path / "conflated.parquet"
+        n = save_conflated_from_parts(paths, out)
+
+        assert n == len(in_mem)
+        assert out.exists()
+        round_trip = gpd.read_parquet(out)
+        assert len(round_trip) == len(in_mem)
+        assert (
+            set(round_trip["unified_id"])
+            == set(in_mem["unified_id"])
+        )
+        # Temp files and tmp_dir should be removed after streaming.
+        for p in paths:
+            assert not p.exists()

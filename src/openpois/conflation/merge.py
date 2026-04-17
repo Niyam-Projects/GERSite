@@ -10,9 +10,14 @@ Produces a GeoDataFrame superset:
   - Unmatched OSM POIs with their original confidence.
   - Unmatched Overture POIs with downweighted confidence.
 
-For large datasets, ``build_merge_parts`` writes each subset to a
-temp parquet file so that source GeoDataFrames can be freed before
-the final concat+save in ``save_conflated_from_parts``.
+Three entry points:
+  - ``merge_matched_pois``: in-memory, for tests/small datasets.
+  - ``build_merge_parts``: disk-backed, row-sliced. Writes multiple
+    part parquets so peak memory is bounded by slice size.
+  - ``build_merge_parts_chunked``: disk-backed, spatial-chunk-sliced.
+    Reuses the ``osm_primary`` / ``overture_primary`` arrays produced
+    by the chunked matching driver so each per-chunk part is small
+    and independent.
 """
 from __future__ import annotations
 
@@ -149,120 +154,124 @@ def _build_matched_gdf(
 
 def _build_unmatched_osm_gdf(
     osm_gdf: gpd.GeoDataFrame,
-    matched_osm_set: set[int],
+    idx: np.ndarray,
     osm_shared_labels: np.ndarray,
 ) -> gpd.GeoDataFrame:
-    """Build GeoDataFrame for unmatched OSM POIs."""
-    mask = np.ones(len(osm_gdf), dtype = bool)
-    if matched_osm_set:
-        mask[np.array(list(matched_osm_set), dtype = np.int64)] = (
-            False
-        )
-    idx = np.where(mask)[0]
-    sub = osm_gdf.iloc[idx]
+    """Build GeoDataFrame for unmatched OSM POIs at the given indices.
+
+    Uses column-wise ``to_numpy()[idx]`` to avoid a full ``.iloc[idx]``
+    copy — the old implementation held both the source frame and the
+    full iloc copy in memory simultaneously.
+    """
+    n = len(idx)
+
+    osm_ids = osm_gdf["osm_id"].to_numpy()[idx]
+    names = osm_gdf["name"].to_numpy()[idx]
+    brand_arr = (
+        osm_gdf["brand"].to_numpy()[idx]
+        if "brand" in osm_gdf.columns
+        else np.full(n, None, dtype = object)
+    )
+    conf_mean = osm_gdf["conf_mean"].to_numpy()[idx].astype(float)
+    conf_lower = osm_gdf["conf_lower"].to_numpy()[idx].astype(float)
+    conf_upper = osm_gdf["conf_upper"].to_numpy()[idx].astype(float)
+    geoms = osm_gdf.geometry.to_numpy()[idx]
+
+    unified_ids = np.array(
+        [f"osm:{x}" for x in osm_ids], dtype = object,
+    )
 
     return gpd.GeoDataFrame(
         {
-            "unified_id": np.array(
-                [f"osm:{x}" for x in sub["osm_id"].to_numpy()],
-                dtype = object,
-            ),
+            "unified_id": unified_ids,
             "source": "osm",
-            "osm_id": sub["osm_id"].to_numpy(),
-            "overture_id": np.full(len(sub), None, dtype = object),
-            "name": sub["name"].to_numpy(),
-            "brand": (
-                sub["brand"].to_numpy()
-                if "brand" in sub.columns
-                else np.full(len(sub), None, dtype = object)
-            ),
+            "osm_id": osm_ids,
+            "overture_id": np.full(n, None, dtype = object),
+            "name": names,
+            "brand": brand_arr,
             "shared_label": osm_shared_labels[idx],
-            "conf_mean": sub["conf_mean"].to_numpy().astype(float),
-            "conf_lower": sub["conf_lower"].to_numpy().astype(float),
-            "conf_upper": sub["conf_upper"].to_numpy().astype(float),
-            "match_score": np.full(len(sub), np.nan),
-            "match_distance_m": np.full(len(sub), np.nan),
-            "osm_name": sub["name"].to_numpy(),
-            "overture_name": np.full(
-                len(sub), None, dtype = object
-            ),
-            "osm_brand": (
-                sub["brand"].to_numpy()
-                if "brand" in sub.columns
-                else np.full(len(sub), None, dtype = object)
-            ),
-            "overture_brand": np.full(
-                len(sub), None, dtype = object
-            ),
-            "osm_conf_mean": sub["conf_mean"].to_numpy().astype(
-                float
-            ),
-            "overture_confidence": np.full(len(sub), np.nan),
+            "conf_mean": conf_mean,
+            "conf_lower": conf_lower,
+            "conf_upper": conf_upper,
+            "match_score": np.full(n, np.nan),
+            "match_distance_m": np.full(n, np.nan),
+            "osm_name": names,
+            "overture_name": np.full(n, None, dtype = object),
+            "osm_brand": brand_arr,
+            "overture_brand": np.full(n, None, dtype = object),
+            "osm_conf_mean": conf_mean,
+            "overture_confidence": np.full(n, np.nan),
         },
-        geometry = sub.geometry.to_numpy(),
-        crs = sub.crs,
+        geometry = geoms,
+        crs = osm_gdf.crs,
     )
 
 
 def _build_unmatched_overture_gdf(
     overture_gdf: gpd.GeoDataFrame,
-    matched_ov_set: set[int],
+    idx: np.ndarray,
     overture_shared_labels: np.ndarray,
     w: float,
 ) -> gpd.GeoDataFrame:
-    """Build GeoDataFrame for unmatched Overture POIs."""
-    mask = np.ones(len(overture_gdf), dtype = bool)
-    if matched_ov_set:
-        mask[np.array(list(matched_ov_set), dtype = np.int64)] = (
-            False
-        )
-    idx = np.where(mask)[0]
-    sub = overture_gdf.iloc[idx]
+    """Build GeoDataFrame for unmatched Overture POIs at the given
+    indices.
+    """
+    n = len(idx)
 
-    ov_conf_raw = sub["confidence"].to_numpy()
+    ov_ids = overture_gdf["overture_id"].to_numpy()[idx]
+    names = overture_gdf["overture_name"].to_numpy()[idx]
+    brand_arr = (
+        overture_gdf["brand_name"].to_numpy()[idx]
+        if "brand_name" in overture_gdf.columns
+        else np.full(n, None, dtype = object)
+    )
+    ov_conf_raw = overture_gdf["confidence"].to_numpy()[idx]
     ov_conf = pd.to_numeric(
         ov_conf_raw, errors = "coerce"
     ).astype(float)
     ov_conf = np.where(np.isnan(ov_conf), 0.5, ov_conf)
+    geoms = overture_gdf.geometry.to_numpy()[idx]
+
+    unified_ids = np.array(
+        [f"overture:{x}" for x in ov_ids], dtype = object,
+    )
 
     return gpd.GeoDataFrame(
         {
-            "unified_id": np.array(
-                [
-                    f"overture:{x}"
-                    for x in sub["overture_id"].to_numpy()
-                ],
-                dtype = object,
-            ),
+            "unified_id": unified_ids,
             "source": "overture",
-            "osm_id": np.full(len(sub), None, dtype = object),
-            "overture_id": sub["overture_id"].to_numpy(),
-            "name": sub["overture_name"].to_numpy(),
-            "brand": (
-                sub["brand_name"].to_numpy()
-                if "brand_name" in sub.columns
-                else np.full(len(sub), None, dtype = object)
-            ),
+            "osm_id": np.full(n, None, dtype = object),
+            "overture_id": ov_ids,
+            "name": names,
+            "brand": brand_arr,
             "shared_label": overture_shared_labels[idx],
             "conf_mean": ov_conf * w,
-            "conf_lower": np.full(len(sub), np.nan),
-            "conf_upper": np.full(len(sub), np.nan),
-            "match_score": np.full(len(sub), np.nan),
-            "match_distance_m": np.full(len(sub), np.nan),
-            "osm_name": np.full(len(sub), None, dtype = object),
-            "overture_name": sub["overture_name"].to_numpy(),
-            "osm_brand": np.full(len(sub), None, dtype = object),
-            "overture_brand": (
-                sub["brand_name"].to_numpy()
-                if "brand_name" in sub.columns
-                else np.full(len(sub), None, dtype = object)
-            ),
-            "osm_conf_mean": np.full(len(sub), np.nan),
+            "conf_lower": np.full(n, np.nan),
+            "conf_upper": np.full(n, np.nan),
+            "match_score": np.full(n, np.nan),
+            "match_distance_m": np.full(n, np.nan),
+            "osm_name": np.full(n, None, dtype = object),
+            "overture_name": names,
+            "osm_brand": np.full(n, None, dtype = object),
+            "overture_brand": brand_arr,
+            "osm_conf_mean": np.full(n, np.nan),
             "overture_confidence": ov_conf,
         },
-        geometry = sub.geometry.to_numpy(),
+        geometry = geoms,
         crs = overture_gdf.crs,
     )
+
+
+def _unmatched_idx(
+    n: int, matched_idx: np.ndarray,
+) -> np.ndarray:
+    """Return the sorted indices in ``[0, n)`` not present in
+    ``matched_idx``.
+    """
+    mask = np.ones(n, dtype = bool)
+    if len(matched_idx) > 0:
+        mask[matched_idx] = False
+    return np.where(mask)[0]
 
 
 # -----------------------------------------------------------------
@@ -282,9 +291,9 @@ def merge_matched_pois(
     Build the unified conflated dataset from matches + unmatched.
 
     This in-memory version is suitable for tests and small datasets.
-    For large datasets, use ``build_merge_parts`` +
-    ``save_conflated_from_parts`` to avoid holding all parts in
-    memory simultaneously.
+    For large datasets, use ``build_merge_parts`` (row-sliced) or
+    ``build_merge_parts_chunked`` (spatial-chunk-sliced) +
+    ``save_conflated_from_parts``.
 
     Returns:
         Conflated GeoDataFrame with unified schema.
@@ -293,8 +302,8 @@ def merge_matched_pois(
     osm_w = 1.0 / (1.0 + w)
     ov_w = w / (1.0 + w)
 
-    matched_osm_set = set(matches["osm_idx"].to_numpy())
-    matched_ov_set = set(matches["overture_idx"].to_numpy())
+    matched_osm_idx = matches["osm_idx"].to_numpy()
+    matched_ov_idx = matches["overture_idx"].to_numpy()
 
     parts = []
 
@@ -308,24 +317,54 @@ def merge_matched_pois(
 
     parts.append(
         _build_unmatched_osm_gdf(
-            osm_gdf, matched_osm_set, osm_shared_labels,
+            osm_gdf,
+            _unmatched_idx(len(osm_gdf), matched_osm_idx),
+            osm_shared_labels,
         )
     )
 
     parts.append(
         _build_unmatched_overture_gdf(
-            overture_gdf, matched_ov_set,
+            overture_gdf,
+            _unmatched_idx(len(overture_gdf), matched_ov_idx),
             overture_shared_labels, w,
         )
     )
 
+    # Normalize CRS across parts — OSM and Overture may declare the
+    # same WGS84 lon/lat system with different authority strings
+    # (e.g. "WGS 84" vs "WGS 84 (CRS84)"), which breaks pd.concat.
+    target_crs = osm_gdf.crs
+    for part in parts:
+        if part.crs != target_crs:
+            part.set_crs(
+                target_crs, allow_override = True, inplace = True,
+            )
+
     result = pd.concat(parts, ignore_index = True)
-    return gpd.GeoDataFrame(result, crs = osm_gdf.crs)
+    return gpd.GeoDataFrame(result, crs = target_crs)
 
 
 # -----------------------------------------------------------------
 # Disk-backed merge (for large datasets)
 # -----------------------------------------------------------------
+
+
+def _write_part(
+    gdf: gpd.GeoDataFrame, path: Path,
+) -> None:
+    gdf.to_parquet(path, compression = "zstd")
+
+
+def _split_indices(
+    idx: np.ndarray, n_slices: int,
+) -> list[np.ndarray]:
+    """Split an index array into ``n_slices`` roughly-equal contiguous
+    ranges. Preserves order so downstream concat stays deterministic.
+    """
+    if n_slices <= 1 or len(idx) == 0:
+        return [idx]
+    return [s for s in np.array_split(idx, n_slices) if len(s) > 0]
 
 
 def build_merge_parts(
@@ -335,16 +374,20 @@ def build_merge_parts(
     osm_shared_labels: np.ndarray,
     overture_shared_labels: np.ndarray,
     overture_confidence_weight: float = 0.7,
+    n_slices: int = 4,
 ) -> list[Path]:
     """
-    Build each merge subset, write to temp parquet files.
+    Build each merge subset, writing to temp parquet files.
 
-    Each part is written to disk and freed immediately so that the
-    caller can delete the source GeoDataFrames before the final
-    concat+save step.
+    Unmatched OSM and Overture rows are split into ``n_slices``
+    contiguous row ranges each, and each slice is built and written
+    independently. This caps peak memory at roughly
+    ``(1 / n_slices)`` of the full-dataset footprint for unmatched
+    parts. The matched part is written as a single file (it is the
+    smallest and already bounded by the number of matches).
 
     Returns:
-        List of temp parquet file paths (matched, osm, overture).
+        List of temp parquet file paths in concat order.
     """
     tmp_dir = Path(tempfile.mkdtemp(prefix = "openpois_merge_"))
 
@@ -352,11 +395,11 @@ def build_merge_parts(
     osm_w = 1.0 / (1.0 + w)
     ov_w = w / (1.0 + w)
 
-    matched_osm_set = set(matches["osm_idx"].to_numpy())
-    matched_ov_set = set(matches["overture_idx"].to_numpy())
+    matched_osm_idx = matches["osm_idx"].to_numpy()
+    matched_ov_idx = matches["overture_idx"].to_numpy()
     part_paths: list[Path] = []
 
-    # Part 1: matched pairs
+    # Part 1: matched pairs (single file)
     if len(matches) > 0:
         print(f"  Building {len(matches):,} matched pairs ...")
         part = _build_matched_gdf(
@@ -364,39 +407,243 @@ def build_merge_parts(
             osm_shared_labels, osm_w, ov_w,
         )
         p = tmp_dir / "1_matched.parquet"
-        part.to_parquet(p, compression = "zstd")
+        _write_part(part, p)
         part_paths.append(p)
         del part
         gc.collect()
 
-    # Part 2: unmatched OSM
-    n_unmatched_osm = len(osm_gdf) - len(matched_osm_set)
+    # Part 2: unmatched OSM (sliced)
+    unmatched_osm = _unmatched_idx(
+        len(osm_gdf), matched_osm_idx,
+    )
+    osm_slices = _split_indices(unmatched_osm, n_slices)
     print(
-        f"  Building {n_unmatched_osm:,} unmatched OSM POIs ..."
+        f"  Building {len(unmatched_osm):,} unmatched OSM POIs "
+        f"in {len(osm_slices)} slice(s) ..."
     )
-    part = _build_unmatched_osm_gdf(
-        osm_gdf, matched_osm_set, osm_shared_labels,
+    for i, sl in enumerate(osm_slices):
+        part = _build_unmatched_osm_gdf(
+            osm_gdf, sl, osm_shared_labels,
+        )
+        p = tmp_dir / f"2_unmatched_osm_{i:02d}.parquet"
+        _write_part(part, p)
+        part_paths.append(p)
+        del part
+        gc.collect()
+
+    # Part 3: unmatched Overture (sliced)
+    unmatched_ov = _unmatched_idx(
+        len(overture_gdf), matched_ov_idx,
     )
-    p = tmp_dir / "2_unmatched_osm.parquet"
-    part.to_parquet(p, compression = "zstd")
-    part_paths.append(p)
-    del part
+    ov_slices = _split_indices(unmatched_ov, n_slices)
+    print(
+        f"  Building {len(unmatched_ov):,} unmatched Overture "
+        f"POIs in {len(ov_slices)} slice(s) ..."
+    )
+    for i, sl in enumerate(ov_slices):
+        part = _build_unmatched_overture_gdf(
+            overture_gdf, sl,
+            overture_shared_labels, w,
+        )
+        p = tmp_dir / f"3_unmatched_overture_{i:02d}.parquet"
+        _write_part(part, p)
+        part_paths.append(p)
+        del part
+        gc.collect()
+
+    return part_paths
+
+
+def _group_idx_by_chunk(
+    idx: np.ndarray,
+    primary: np.ndarray,
+    n_chunks: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Given a subset of indices and a global ``primary`` array,
+    return ``(idx_sorted_by_chunk, chunk_offsets)`` where
+    ``chunk_offsets[c:c+2]`` slices out the indices for chunk ``c``.
+    """
+    if len(idx) == 0:
+        return (
+            np.empty(0, dtype = np.int64),
+            np.zeros(n_chunks + 1, dtype = np.int64),
+        )
+    chunks = primary[idx]
+    order = np.argsort(chunks, kind = "stable")
+    idx_sorted = idx[order]
+    chunks_sorted = chunks[order]
+    offsets = np.searchsorted(
+        chunks_sorted, np.arange(n_chunks + 1),
+    ).astype(np.int64)
+    return idx_sorted, offsets
+
+
+def build_merge_parts_chunked(
+    osm_gdf: gpd.GeoDataFrame,
+    overture_gdf: gpd.GeoDataFrame,
+    matches: pd.DataFrame,
+    osm_shared_labels: np.ndarray,
+    overture_shared_labels: np.ndarray,
+    osm_primary: np.ndarray,
+    overture_primary: np.ndarray,
+    n_chunks: int,
+    overture_confidence_weight: float = 0.7,
+) -> list[Path]:
+    """
+    Build per-spatial-chunk merge parts, writing one parquet per chunk.
+
+    Reuses the KD-bisected chunks produced by the chunked matching
+    driver: for each chunk ``c`` we emit matched pairs whose OSM POI
+    has ``osm_primary == c`` (the same OSM-anchored emit rule used
+    during matching), unmatched OSM POIs with ``osm_primary == c``,
+    and unmatched Overture POIs with ``overture_primary == c``.
+
+    Peak memory per chunk is bounded by chunk size × 18-column
+    schema, so this stays within a few hundred MB for ~200k-POI
+    chunks regardless of total dataset size.
+
+    Args:
+        osm_gdf, overture_gdf: Full source frames.
+        matches: Post-dedup match DataFrame (osm_idx unique).
+        osm_shared_labels, overture_shared_labels: Parallel to source
+            frames.
+        osm_primary, overture_primary: ``(n,)`` int arrays assigning
+            each row to its primary chunk. Produced by
+            ``chunking.assign_primary_chunk``.
+        n_chunks: Total number of chunks; used for offset arrays.
+        overture_confidence_weight: Blend weight ``w`` (see
+            ``_build_matched_gdf``).
+
+    Returns:
+        List of per-chunk part file paths, in ascending chunk order.
+    """
+    tmp_dir = Path(tempfile.mkdtemp(prefix = "openpois_merge_"))
+
+    w = overture_confidence_weight
+    osm_w = 1.0 / (1.0 + w)
+    ov_w = w / (1.0 + w)
+
+    # Sort matches by the OSM POI's primary chunk. The OSM-anchored
+    # emit rule guarantees osm_idx is unique, so each match belongs to
+    # exactly one chunk.
+    if len(matches) > 0:
+        matched_osm_idx = matches["osm_idx"].to_numpy()
+        matched_ov_idx = matches["overture_idx"].to_numpy()
+        match_chunk = osm_primary[matched_osm_idx]
+        match_order = np.argsort(match_chunk, kind = "stable")
+        matches_sorted = matches.iloc[match_order].reset_index(
+            drop = True,
+        )
+        match_chunk_sorted = match_chunk[match_order]
+        match_offsets = np.searchsorted(
+            match_chunk_sorted, np.arange(n_chunks + 1),
+        ).astype(np.int64)
+    else:
+        matched_osm_idx = np.empty(0, dtype = np.int64)
+        matched_ov_idx = np.empty(0, dtype = np.int64)
+        matches_sorted = matches
+        match_offsets = np.zeros(
+            n_chunks + 1, dtype = np.int64,
+        )
+
+    unmatched_osm = _unmatched_idx(len(osm_gdf), matched_osm_idx)
+    osm_by_chunk, osm_offsets = _group_idx_by_chunk(
+        unmatched_osm, osm_primary, n_chunks,
+    )
+    del unmatched_osm
     gc.collect()
 
-    # Part 3: unmatched Overture
-    n_unmatched_ov = len(overture_gdf) - len(matched_ov_set)
-    print(
-        f"  Building {n_unmatched_ov:,} unmatched Overture POIs ..."
+    unmatched_ov = _unmatched_idx(
+        len(overture_gdf), matched_ov_idx,
     )
-    part = _build_unmatched_overture_gdf(
-        overture_gdf, matched_ov_set,
-        overture_shared_labels, w,
+    ov_by_chunk, ov_offsets = _group_idx_by_chunk(
+        unmatched_ov, overture_primary, n_chunks,
     )
-    p = tmp_dir / "3_unmatched_overture.parquet"
-    part.to_parquet(p, compression = "zstd")
-    part_paths.append(p)
-    del part
+    del unmatched_ov
     gc.collect()
+
+    part_paths: list[Path] = []
+    total_matched = 0
+    total_unmatched_osm = 0
+    total_unmatched_ov = 0
+
+    print(
+        f"  Building {n_chunks} per-chunk merge parts ..."
+    )
+    for c in range(n_chunks):
+        subparts: list[gpd.GeoDataFrame] = []
+
+        m_start, m_end = (
+            int(match_offsets[c]), int(match_offsets[c + 1]),
+        )
+        if m_end > m_start:
+            matched_c = matches_sorted.iloc[m_start:m_end]
+            subparts.append(
+                _build_matched_gdf(
+                    osm_gdf, overture_gdf, matched_c,
+                    osm_shared_labels, osm_w, ov_w,
+                )
+            )
+            total_matched += m_end - m_start
+
+        o_start, o_end = (
+            int(osm_offsets[c]), int(osm_offsets[c + 1]),
+        )
+        if o_end > o_start:
+            osm_idx_c = osm_by_chunk[o_start:o_end]
+            subparts.append(
+                _build_unmatched_osm_gdf(
+                    osm_gdf, osm_idx_c, osm_shared_labels,
+                )
+            )
+            total_unmatched_osm += o_end - o_start
+
+        v_start, v_end = (
+            int(ov_offsets[c]), int(ov_offsets[c + 1]),
+        )
+        if v_end > v_start:
+            ov_idx_c = ov_by_chunk[v_start:v_end]
+            subparts.append(
+                _build_unmatched_overture_gdf(
+                    overture_gdf, ov_idx_c,
+                    overture_shared_labels, w,
+                )
+            )
+            total_unmatched_ov += v_end - v_start
+
+        if not subparts:
+            continue
+
+        # OSM and Overture may be loaded with different CRS
+        # representations for the same WGS84 lon/lat system
+        # (e.g. "WGS 84" vs "WGS 84 (CRS84)"). Geometries are
+        # already in lon/lat on both sides, so force a common CRS
+        # without reprojecting.
+        target_crs = osm_gdf.crs
+        for sp in subparts:
+            if sp.crs != target_crs:
+                sp.set_crs(
+                    target_crs, allow_override = True,
+                    inplace = True,
+                )
+
+        chunk_gdf = pd.concat(subparts, ignore_index = True)
+        p = tmp_dir / f"chunk_{c:04d}.parquet"
+        _write_part(
+            gpd.GeoDataFrame(chunk_gdf, crs = target_crs), p,
+        )
+        part_paths.append(p)
+        del subparts, chunk_gdf
+        gc.collect()
+
+        done = c + 1
+        if done % 25 == 0 or done == n_chunks:
+            print(
+                f"    {done}/{n_chunks} chunks written "
+                f"(matched: {total_matched:,}, "
+                f"unmatched OSM: {total_unmatched_osm:,}, "
+                f"unmatched Overture: {total_unmatched_ov:,})"
+            )
 
     return part_paths
 
@@ -406,34 +653,58 @@ def save_conflated_from_parts(
     output_path: Path,
 ) -> int:
     """
-    Concatenate temp parquet parts via PyArrow and save.
+    Stream temp parquet parts into the final output file.
 
-    Uses PyArrow's zero-copy ``concat_tables`` to avoid loading
-    all data as pandas DataFrames simultaneously. Skips Hilbert
-    sorting to stay within memory limits.
+    Opens each part sequentially, unifies its schema against the
+    writer, and appends its row groups. Only one part is held in
+    memory at a time, so peak memory is bounded by the largest
+    part — independent of the number of parts or the total dataset
+    size. Skips Hilbert sorting to stay within memory limits.
 
     Returns:
         Number of POIs written.
     """
+    if not part_paths:
+        raise ValueError("No part paths provided.")
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents = True, exist_ok = True)
 
-    print("  Concatenating parts via PyArrow ...")
-    tables = [pq.read_table(p) for p in part_paths]
-    combined = pa.concat_tables(tables, promote_options = "permissive")
-    del tables
-    gc.collect()
-
-    n = combined.num_rows
-    print(f"  Saving {n:,} POIs to {output_path} ...")
-    pq.write_table(
-        combined,
-        output_path,
-        compression = "zstd",
-        row_group_size = 50_000,
+    # First pass: read schemas and compute a promoted schema so the
+    # writer can accept all parts even if some are missing optional
+    # columns or have slightly different null-vs-typed fields.
+    schemas = [pq.read_schema(p) for p in part_paths]
+    unified_schema = pa.unify_schemas(
+        schemas, promote_options = "permissive",
     )
-    del combined
-    gc.collect()
+
+    print(
+        f"  Streaming {len(part_paths)} parts into "
+        f"{output_path} ..."
+    )
+    n = 0
+    writer = pq.ParquetWriter(
+        output_path,
+        unified_schema,
+        compression = "zstd",
+    )
+    try:
+        for i, p in enumerate(part_paths):
+            table = pq.read_table(p)
+            # Re-cast columns to the unified schema so row groups
+            # written sequentially stay compatible.
+            table = table.cast(unified_schema, safe = False)
+            writer.write_table(table, row_group_size = 50_000)
+            n += table.num_rows
+            del table
+            gc.collect()
+            if (i + 1) % 25 == 0 or (i + 1) == len(part_paths):
+                print(
+                    f"    {i + 1}/{len(part_paths)} parts written "
+                    f"({n:,} rows)"
+                )
+    finally:
+        writer.close()
 
     # Clean up temp files
     for p in part_paths:

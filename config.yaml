@@ -40,9 +40,9 @@ download:
     history_pbf_url: "https://osm-internal.download.geofabrik.de/north-america/us-internal.osh.pbf"
     pr_history_pbf_url: "https://osm-internal.download.geofabrik.de/north-america/us/puerto-rico-internal.osh.pbf"
     history_cookie_file: "~/data/openpois/.creds/geofabrik_cookies.txt"
-    overwrite_download: false
-    overwrite_filter: false
-    overwrite_parse: false
+    overwrite_download: true
+    overwrite_filter: true
+    overwrite_parse: true
     source_label: "osm"
     keep_all_keys: false
     chunk_size: 100_000
@@ -223,6 +223,7 @@ conflation:
   type_weight: 0.30
   identifier_weight: 0.20
   chunk_size: 500_000
+  chunk_target_pois: 200_000
   test_bbox:
     xmin: -122.45
     ymin: 47.50
