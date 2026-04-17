@@ -130,9 +130,31 @@ def _build_bbox_predicate(coarse_bboxes: list[dict]) -> str:
     return "(" + " OR ".join(terms) + ")"
 
 
+def _build_taxonomy_predicate(
+    allowlist: list[tuple[str, str | None]],
+) -> str:
+    """Return a SQL fragment ORing per-(L0, L1) taxonomy predicates together.
+
+    If the L1 entry is ``None`` the predicate matches any L1 under that L0.
+    """
+    if not allowlist:
+        raise ValueError("taxonomy allowlist must contain at least one entry.")
+    terms = []
+    for entry in allowlist:
+        l0, l1 = entry[0], entry[1]
+        if l1 is None:
+            terms.append(f"taxonomy.hierarchy[1] = '{l0}'")
+        else:
+            terms.append(
+                f"(taxonomy.hierarchy[1] = '{l0}' "
+                f"AND taxonomy.hierarchy[2] = '{l1}')"
+            )
+    return "(" + " OR ".join(terms) + ")"
+
+
 def download_overture_snapshot(
     output_path: Path,
-    taxonomy_l0_categories: list[str],
+    taxonomy_allowlist: list,
     boundary_gdf: gpd.GeoDataFrame,
     coarse_bboxes: list[dict],
     bucket: str,
@@ -158,8 +180,10 @@ def download_overture_snapshot(
 
     Args:
         output_path: Path to write the output GeoParquet file.
-        taxonomy_l0_categories: List of Overture taxonomy L0 values to retain.
-            Valid values (from S3 data as of 2026-02-18): 'food_and_drink',
+        taxonomy_allowlist: List of (L0, L1) pairs specifying which taxonomy
+            branches to retain. ``L1 = None`` means "all L1s under this L0".
+            Accepts pairs as two-element tuples or lists (YAML).
+            Valid L0 values (from S3 data as of 2026-02-18): 'food_and_drink',
             'shopping', 'arts_and_entertainment', 'sports_and_recreation',
             'health_care', 'services_and_business',
             'travel_and_transportation', 'lifestyle_services', 'education',
@@ -197,8 +221,8 @@ def download_overture_snapshot(
 
     s3_path = build_overture_s3_path(release_date, bucket = bucket)
 
-    categories_sql = ", ".join(f"'{c}'" for c in taxonomy_l0_categories)
     bbox_predicate = _build_bbox_predicate(coarse_bboxes)
+    taxonomy_predicate = _build_taxonomy_predicate(taxonomy_allowlist)
 
     query = f"""
         SELECT
@@ -216,7 +240,7 @@ def download_overture_snapshot(
         FROM read_parquet('{s3_path}', hive_partitioning=1)
         WHERE
             {bbox_predicate}
-            AND taxonomy.hierarchy[1] IN ({categories_sql})
+            AND {taxonomy_predicate}
     """
 
     print(f"Querying Overture S3 at {s3_path}...")
@@ -224,6 +248,9 @@ def download_overture_snapshot(
     conn.execute("INSTALL httpfs; LOAD httpfs;")
     conn.execute("INSTALL spatial; LOAD spatial;")
     conn.execute(f"SET s3_region='{s3_region}';")
+    # Workaround for DuckDB httpfs bug ("Information loss on integer cast")
+    # that fires on broad, wide-fanout scans of the Overture S3 bucket.
+    conn.execute("SET enable_external_file_cache=false;")
 
     df = conn.execute(query).df()
     conn.close()

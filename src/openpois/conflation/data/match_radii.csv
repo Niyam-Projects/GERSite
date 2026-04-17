@@ -62,7 +62,7 @@ Playground,100
 Post Office,50
 Recreation,100
 Restaurant,50
-Salon and Hair,50
+Hair and Beauty,50
 School,100
 Shoe Store,50
 Shopping Center,200
@@ -78,3 +78,16 @@ Tire Store,50
 University,200
 Veterinarian,50
 Wholesale Store,100
+ATM,25
+Campground,200
+Cemetery,200
+Government Office,50
+Home Service,50
+Hotel,100
+Legal Service,50
+Other Financial,50
+Other Professional,50
+Place of Worship,100
+Public Restroom,50
+Public Safety,50
+Real Estate,50

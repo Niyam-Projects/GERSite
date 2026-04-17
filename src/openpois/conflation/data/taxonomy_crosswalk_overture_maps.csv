@@ -117,9 +117,9 @@ health_care,occupational_therapy,,Occupational Therapy
 health_care,optometrist,optician,Eye Care
 health_care,optometrist,optometrist,Eye Care
 health_care,optometrist,,Eye Care
-health_care,personal_care_service,beauty_salon,Salon and Hair
-health_care,personal_care_service,hairdresser,Salon and Hair
-health_care,personal_care_service,,Salon and Hair
+health_care,personal_care_service,beauty_salon,Hair and Beauty
+health_care,personal_care_service,hairdresser,Hair and Beauty
+health_care,personal_care_service,,Hair and Beauty
 health_care,physical_therapy,physiotherapy,Physical Therapy
 health_care,physical_therapy,rehabilitation,Physical Therapy
 health_care,physical_therapy,,Physical Therapy
@@ -233,3 +233,74 @@ sports_and_recreation,trail,,Recreation
 sports_and_recreation,water_sport,water_sport,Recreation
 sports_and_recreation,water_sport,,Recreation
 sports_and_recreation,,,Recreation
+community_and_government,civic_organization,,Community Center
+community_and_government,government_office,,Government Office
+community_and_government,public_facility,public_restroom,Public Restroom
+community_and_government,public_facility,,Public Restroom
+community_and_government,public_safety_service,fire_station,Public Safety
+community_and_government,public_safety_service,police,Public Safety
+community_and_government,public_safety_service,,Public Safety
+community_and_government,social_or_community_service,post_office,Post Office
+community_and_government,social_or_community_service,community_centre,Community Center
+community_and_government,social_or_community_service,,Community Center
+community_and_government,,,Community Center
+cultural_and_historic,cultural_center,,Community Center
+cultural_and_historic,historic_site,,Museum
+cultural_and_historic,memorial_site,cemetery,Cemetery
+cultural_and_historic,memorial_site,monument,Museum
+cultural_and_historic,memorial_site,,Museum
+cultural_and_historic,place_of_worship,,Place of Worship
+cultural_and_historic,religious_organization,,Place of Worship
+cultural_and_historic,,,Other Amenity
+education,educational_facility,,School
+education,library,,Library
+education,place_of_learning,adult_education_center,School
+education,place_of_learning,college_university,University
+education,place_of_learning,school,School
+education,place_of_learning,specialty_school,School
+education,place_of_learning,,School
+education,,,School
+lifestyle_services,animal_or_pet_service,pet_care_service,Pet Store
+lifestyle_services,animal_or_pet_service,veterinary_care,Veterinarian
+lifestyle_services,animal_or_pet_service,,Pet Store
+lifestyle_services,beauty_service,,Hair and Beauty
+lifestyle_services,food_service,,Other Amenity
+lifestyle_services,personal_or_beauty_service,barber,Hair and Beauty
+lifestyle_services,personal_or_beauty_service,beauty_salon,Hair and Beauty
+lifestyle_services,personal_or_beauty_service,body_modification,Hair and Beauty
+lifestyle_services,personal_or_beauty_service,hair_salon,Hair and Beauty
+lifestyle_services,personal_or_beauty_service,nail_salon,Hair and Beauty
+lifestyle_services,personal_or_beauty_service,,Hair and Beauty
+lifestyle_services,wellness_service,health_and_wellness_club,Fitness Center
+lifestyle_services,wellness_service,massage_therapy,Massage Therapy
+lifestyle_services,wellness_service,spa,Massage Therapy
+lifestyle_services,wellness_service,,Massage Therapy
+lodging,bed_and_breakfast,,Hotel
+lodging,cabin,,Hotel
+lodging,campground,,Campground
+lodging,cottage,,Hotel
+lodging,hostel,,Hotel
+lodging,hotel,motel,Hotel
+lodging,hotel,,Hotel
+lodging,inn,,Hotel
+lodging,lodge,,Hotel
+lodging,resort,,Hotel
+lodging,rv_park,,Campground
+lodging,,,Hotel
+services_and_business,financial_service,atm,ATM
+services_and_business,financial_service,bank_or_credit_union,Bank
+services_and_business,financial_service,,Other Financial
+services_and_business,home_service,contractor,Home Service
+services_and_business,home_service,interior_design,Home Service
+services_and_business,home_service,key_and_locksmith,Home Service
+services_and_business,home_service,landscaping,Home Service
+services_and_business,home_service,,Home Service
+services_and_business,legal_service,,Legal Service
+services_and_business,professional_service,,Other Professional
+services_and_business,real_estate_service,,Real Estate
+travel_and_transportation,fueling_station,ev_charging_station,Charging Station
+travel_and_transportation,fueling_station,gas_station,Gas Station
+travel_and_transportation,fueling_station,,Gas Station
+travel_and_transportation,vehicle_service,automotive_service,Car Repair
+travel_and_transportation,vehicle_service,car_wash,Car Wash
+travel_and_transportation,vehicle_service,,Car Repair

@@ -19,15 +19,23 @@ import pandas as pd
 
 WILDCARD = "*"
 
-# Bit flags for the five Overture L0 categories.  Used by
+# Bit flags for the Overture L0 categories.  Used by
 # ``compute_osm_l0_bits`` / ``compute_overture_l0_bits`` for
-# fast vectorised broad-match checks in type scoring.
+# fast vectorised broad-match checks in type scoring. Backing
+# dtype is uint16, leaving headroom past the 12 bits used here.
 L0_BIT: dict[str, int] = {
     "arts_and_entertainment": 1,
     "food_and_drink": 2,
     "health_care": 4,
     "shopping": 8,
     "sports_and_recreation": 16,
+    "services_and_business": 32,
+    "lifestyle_services": 64,
+    "community_and_government": 128,
+    "cultural_and_historic": 256,
+    "education": 512,
+    "travel_and_transportation": 1024,
+    "lodging": 2048,
 }
 
 
@@ -341,7 +349,7 @@ def compute_osm_l0_bits(
     top_level_matches: pd.DataFrame,
 ) -> np.ndarray:
     """
-    For each OSM POI, compute a uint8 bitmask encoding which
+    For each OSM POI, compute a uint16 bitmask encoding which
     Overture L0 categories it broadly matches.
 
     A non-null value in an OSM tag key (e.g. ``amenity``) sets the
@@ -358,7 +366,7 @@ def compute_osm_l0_bits(
         bit = L0_BIT.get(l0, 0)
         key_bits[osm_key] = key_bits.get(osm_key, 0) | bit
 
-    bits = np.zeros(len(gdf), dtype = np.uint8)
+    bits = np.zeros(len(gdf), dtype = np.uint16)
     for osm_key, bval in key_bits.items():
         if osm_key in gdf.columns:
             has_val = gdf[osm_key].notna() & (
@@ -373,11 +381,11 @@ def compute_overture_l0_bits(
     l0_array: np.ndarray,
 ) -> np.ndarray:
     """
-    For each Overture POI, compute a uint8 bitmask from its
+    For each Overture POI, compute a uint16 bitmask from its
     ``taxonomy_l0`` value.  Each POI has at most one L0 category,
     so a single bit is set.
     """
-    bits = np.zeros(len(l0_array), dtype = np.uint8)
+    bits = np.zeros(len(l0_array), dtype = np.uint16)
     for l0, bval in L0_BIT.items():
         mask = l0_array == l0
         bits[mask] = bval

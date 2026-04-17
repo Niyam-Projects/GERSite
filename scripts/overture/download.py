@@ -14,7 +14,7 @@ Config keys used (config.yaml):
     download.overture.release_date           — pinned release (null = auto-detect)
     download.overture.s3_bucket              — Overture Maps S3 bucket name
     download.overture.s3_region              — AWS region of the Overture bucket
-    download.overture.taxonomy_l0_categories — L0 category filter list
+    download.overture.taxonomy_allowlist     — list of [L0, L1] pairs; L1 null = any
     download.general.boundary.source_url     — Census state-boundary zip URL
     download.general.boundary.coastline_buffer_m — outward coastline buffer (m)
     directories.boundary                     — cache directory for boundary file
@@ -39,7 +39,7 @@ config = Config("~/repos/openpois/config.yaml")
 RELEASE_DATE = config.get("download", "overture", "release_date", fail_if_none=False)
 S3_BUCKET = config.get("download", "overture", "s3_bucket")
 S3_REGION = config.get("download", "overture", "s3_region")
-TAXONOMY_CATEGORIES = config.get("download", "overture", "taxonomy_l0_categories")
+TAXONOMY_ALLOWLIST = config.get("download", "overture", "taxonomy_allowlist")
 BOUNDARY_URL = config.get("download", "general", "boundary", "source_url")
 COASTLINE_BUFFER_M = config.get(
     "download", "general", "boundary", "coastline_buffer_m"
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     )
     gdf = download_overture_snapshot(
         output_path=OUTPUT_PATH,
-        taxonomy_l0_categories=TAXONOMY_CATEGORIES,
+        taxonomy_allowlist=TAXONOMY_ALLOWLIST,
         boundary_gdf=boundary_gdf,
         coarse_bboxes=coarse_bboxes,
         bucket=S3_BUCKET,

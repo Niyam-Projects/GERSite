@@ -1,7 +1,7 @@
 ﻿osm_key,osm_value,shared_label
 shop,alcohol,Liquor Store
 shop,bakery,Bakery
-shop,beauty,Salon and Hair
+shop,beauty,Hair and Beauty
 shop,bicycle,Bike shop
 shop,books,Bookstore
 shop,car,Car Dealer
@@ -17,10 +17,11 @@ shop,florist,Florist
 shop,furniture,Furniture Store
 shop,garden_centre,Garden Store
 shop,gift,Specialty Store
-shop,hairdresser,Salon and Hair
+shop,hairdresser,Hair and Beauty
 shop,hardware,Hardware
 shop,jewelry,Jewelry Store
 shop,laundry,Laundromat
+shop,locksmith,Home Service
 shop,mall,Shopping Center
 shop,massage,Massage Therapy
 shop,mobile_phone,Cell Phone Store
@@ -56,6 +57,7 @@ healthcare,psychotherapist,Mental Health
 healthcare,rehabilitation,Physical Therapy
 healthcare,speech_therapist,Speech Therapist
 amenity,arts_centre,Arts Venue
+amenity,atm,ATM
 amenity,bank,Bank
 amenity,bar,Bar
 amenity,biergarten,Bar
@@ -68,11 +70,15 @@ amenity,cinema,Movie Theater
 amenity,clinic,Clinic
 amenity,college,University
 amenity,community_centre,Community Center
+amenity,courthouse,Government Office
 amenity,dentist,Dentist
 amenity,doctors,Clinic
 amenity,fast_food,Fast Food
+amenity,fire_station,Public Safety
 amenity,food_court,Restaurant
 amenity,fuel,Gas Station
+amenity,funeral_hall,Cemetery
+amenity,grave_yard,Cemetery
 amenity,hospital,Clinic
 amenity,ice_cream,Dessert Shop
 amenity,kindergarten,Kindergarten
@@ -81,12 +87,16 @@ amenity,marketplace,Market
 amenity,museum,Museum
 amenity,nightclub,Nightclub
 amenity,pharmacy,Pharmacy
+amenity,place_of_worship,Place of Worship
+amenity,police,Public Safety
 amenity,post_office,Post Office
 amenity,pub,Bar
 amenity,restaurant,Restaurant
 amenity,school,School
 amenity,social_centre,Social Club
 amenity,theatre,Performing Arts
+amenity,toilets,Public Restroom
+amenity,townhall,Government Office
 amenity,university,University
 amenity,veterinary,Veterinarian
 leisure,amusement_arcade,Arcade
@@ -112,7 +122,116 @@ leisure,swimming_pool,Swimming Pool
 leisure,track,Recreation
 leisure,trampoline_park,Recreation
 leisure,water_park,Recreation
+tourism,alpine_hut,Hotel
+tourism,apartment,Hotel
+tourism,aquarium,Recreation
+tourism,artwork,Other Amenity
+tourism,attraction,Other Amenity
+tourism,camp_site,Campground
+tourism,caravan_site,Campground
+tourism,chalet,Hotel
+tourism,gallery,Arts Venue
+tourism,guest_house,Hotel
+tourism,hostel,Hotel
+tourism,hotel,Hotel
+tourism,motel,Hotel
+tourism,museum,Museum
+tourism,picnic_site,Other Amenity
+tourism,theme_park,Recreation
+tourism,viewpoint,Other Amenity
+tourism,wilderness_hut,Hotel
+tourism,zoo,Recreation
+office,accountant,Other Professional
+office,advertising_agency,Other Professional
+office,architect,Other Professional
+office,association,Community Center
+office,company,Other Professional
+office,consulting,Other Professional
+office,diplomatic,Government Office
+office,educational_institution,School
+office,employment_agency,Other Professional
+office,engineer,Other Professional
+office,energy_supplier,Other Professional
+office,estate_agent,Real Estate
+office,financial,Other Financial
+office,financial_advisor,Other Financial
+office,government,Government Office
+office,insurance,Other Financial
+office,it,Other Professional
+office,lawyer,Legal Service
+office,logistics,Other Professional
+office,newspaper,Other Professional
+office,ngo,Community Center
+office,notary,Legal Service
+office,political_party,Community Center
+office,property_management,Real Estate
+office,religion,Place of Worship
+office,research,Other Professional
+office,security,Other Professional
+office,tax_advisor,Other Professional
+office,telecommunication,Other Professional
+craft,beekeeper,Home Service
+craft,brewery,Bar
+craft,builder,Home Service
+craft,carpenter,Home Service
+craft,caterer,Bakery
+craft,cleaning,Home Service
+craft,confectionery,Bakery
+craft,dressmaker,Home Service
+craft,electrician,Home Service
+craft,electronics_repair,Specialty Store
+craft,gardener,Home Service
+craft,glaziery,Home Service
+craft,grinding_mill,Specialty Store
+craft,handicraft,Home Service
+craft,hvac,Home Service
+craft,joiner,Home Service
+craft,key_cutter,Home Service
+craft,metal_construction,Home Service
+craft,painter,Home Service
+craft,photographer,Specialty Store
+craft,plumber,Home Service
+craft,roofer,Home Service
+craft,sawmill,Specialty Store
+craft,shoemaker,Specialty Store
+craft,stonemason,Home Service
+craft,tailor,Specialty Store
+craft,upholsterer,Home Service
+craft,window_construction,Home Service
+craft,winery,Bar
+historic,aircraft,Museum
+historic,archaeological_site,Museum
+historic,boundary_stone,Museum
+historic,building,Museum
+historic,cannon,Museum
+historic,castle,Museum
+historic,charcoal_pile,Museum
+historic,church,Place of Worship
+historic,city_gate,Museum
+historic,citywalls,Museum
+historic,fort,Museum
+historic,heritage,Museum
+historic,house,Museum
+historic,manor,Museum
+historic,memorial,Museum
+historic,milestone,Museum
+historic,mine,Museum
+historic,mine_shaft,Museum
+historic,monument,Museum
+historic,railway,Museum
+historic,ruins,Museum
+historic,shieling,Museum
+historic,tomb,Museum
+historic,wayside_cross,Place of Worship
+historic,wayside_shrine,Place of Worship
+historic,wreck,Museum
+landuse,cemetery,Cemetery
+landuse,religious,Place of Worship
 amenity,*,Other Amenity
 healthcare,*,Other Healthcare
 shop,*,Other Shop
 leisure,*,Recreation
+tourism,*,Other Amenity
+office,*,Other Professional
+craft,*,Home Service
+historic,*,Museum
