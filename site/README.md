@@ -6,12 +6,14 @@ Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://
 
 ## Maintenance
 
-### Conflated category labels
+### Taxonomy
 
-The conflated data source filter uses a static list of `shared_label` values
-defined in `src/constants.js` (`CONFLATED_LABELS`). This list is sourced from
-`src/openpois/conflation/data/match_radii.csv`. If the taxonomy crosswalk adds
-or removes labels, update both files to keep them in sync.
+The OSM / Overture / conflated filters derive from arrays in
+`src/taxonomy.generated.js`, which is regenerated from
+`src/openpois/conflation/data/*.csv` by `scripts/build_taxonomy.py`. The file
+is gitignored. Use the `sync-taxonomy` skill (or run `build_taxonomy.py`
+followed by `check_taxonomy_sync.py`) whenever the CSVs change. Only the
+display-label maps in `src/constants.js` are hand-maintained.
 
 ### S3 snapshot URLs
 

@@ -7,11 +7,11 @@ pairs, unmatched OSM POIs, and unmatched Overture POIs.
 ## Usage
 
 ```bash
-# Full run (~15M POIs, ~16 GB RAM)
-python exploratory/conflation/conflate.py
+# Full run (~22M POIs; peak RSS ~10 GB projected, phase-by-phase logged to stdout)
+python scripts/conflation/conflate.py
 
 # Test mode (Seattle bbox, ~30k + ~19k POIs)
-python exploratory/conflation/conflate.py --test
+python scripts/conflation/conflate.py --test
 ```
 
 Output: `~/data/openpois/conflation/{version}/conflated.parquet`
@@ -199,11 +199,22 @@ changelog.
 
 ## Memory and Performance
 
-The pipeline is designed to run within ~16 GB RAM on ~15M total POIs:
+The pipeline targets ~10 GB peak RSS on ~22M total POIs (8.7M OSM + 13M
+Overture). Phase-by-phase RSS / VmHWM is logged to stdout via `log_rss()`
+reading `/proc/self/status`. Key memory tactics:
 
 - Only columns needed for matching are loaded from parquet files
-- BallTree is built once on Overture centroids (~0.4 GB for 7M points)
-- OSM queries are chunked (500k rows per batch)
+- BallTree is built once on Overture centroids (~0.4 GB for 13M points)
+- OSM queries are chunked (500k rows per batch) with chunk match outputs
+  narrowed to int32/float32 dtypes
+- Chunk matches stream to a checkpoint parquet per chunk — no in-memory
+  `part_dfs` accumulation
+- Cross-chunk dedup runs in DuckDB with a bounded memory limit (default 4 GB)
+  via `ROW_NUMBER() OVER (PARTITION BY overture_idx ...)` over the checkpoint
+  parquet glob, instead of pandas concat + sort + drop_duplicates
+- `osm_gdf` / `overture_gdf` are dropped during chunked matching (only
+  centroids are kept for the BallTree) and reloaded with narrow merge-only
+  columns before the merge step
 - Name scoring uses rapidfuzz (C++ backend, ~100x faster than difflib)
 - Output is Hilbert-sorted for efficient cloud-native range reads
 
@@ -217,7 +228,7 @@ src/openpois/conflation/
     match.py                        # Spatial search, scoring, match selection
     merge.py                        # Confidence blending and output assembly
 
-exploratory/conflation/
+scripts/conflation/
     conflate.py                     # Driver script (loads config, calls library)
     README.md                       # This file
 

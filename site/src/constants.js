@@ -1,3 +1,12 @@
+// Taxonomy arrays are generated from the conflation CSVs by
+// scripts/build_taxonomy.py. Only the display-label maps below are
+// hand-maintained. Run `python scripts/check_taxonomy_sync.py` to detect drift.
+import {
+  SHARED_LABELS,
+  OSM_KEYS,
+  OVERTURE_L0S,
+} from './taxonomy.generated.js'
+
 // S3 URLs
 export const OSM_S3_BASE =
   'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260416/osm_snapshot_partitioned'
@@ -24,22 +33,42 @@ export const COLORS = {
 
 export const CONFIDENCE_THRESHOLDS = { low: 0.3, high: 0.7 }
 
-// OSM filter keys and their display labels
-export const OSM_FILTER_KEYS = [
-  { key: 'amenity', label: 'Amenity' },
-  { key: 'shop', label: 'Shop' },
-  { key: 'leisure', label: 'Leisure' },
-  { key: 'healthcare', label: 'Healthcare' },
-]
+const OSM_KEY_LABELS = {
+  amenity: 'Amenity',
+  shop: 'Shop',
+  leisure: 'Leisure',
+  healthcare: 'Healthcare',
+  craft: 'Craft',
+  historic: 'Historic',
+  landuse: 'Landuse',
+  office: 'Office',
+  tourism: 'Tourism',
+}
 
-// Overture L0 categories
-export const OVERTURE_CATEGORIES = [
-  { key: 'food_and_drink', label: 'Food & Drink' },
-  { key: 'shopping', label: 'Shopping' },
-  { key: 'arts_and_entertainment', label: 'Arts & Entertainment' },
-  { key: 'sports_and_recreation', label: 'Sports & Recreation' },
-  { key: 'health_care', label: 'Health Care' },
-]
+const OVERTURE_L0_LABELS = {
+  food_and_drink: 'Food & Drink',
+  shopping: 'Shopping',
+  arts_and_entertainment: 'Arts & Entertainment',
+  sports_and_recreation: 'Sports & Recreation',
+  health_care: 'Health Care',
+  services_and_business: 'Services & Business',
+  lifestyle_services: 'Lifestyle Services',
+  community_and_government: 'Community & Government',
+  cultural_and_historic: 'Cultural & Historic',
+  education: 'Education',
+  travel_and_transportation: 'Travel & Transportation',
+  lodging: 'Lodging',
+}
+
+export const OSM_FILTER_KEYS = OSM_KEYS.map(key => ({
+  key,
+  label: OSM_KEY_LABELS[key] ?? key,
+}))
+
+export const OVERTURE_CATEGORIES = OVERTURE_L0S.map(key => ({
+  key,
+  label: OVERTURE_L0_LABELS[key] ?? key,
+}))
 
 // OpenFreeMap base map styles
 export const BASE_MAP_STYLES = [
@@ -60,103 +89,10 @@ export const BASE_MAP_STYLES = [
   },
 ]
 
-// Conflated shared_label categories
-// Sourced from src/openpois/conflation/data/match_radii.csv — update when labels change.
-export const CONFLATED_LABELS = [
-  'Alternative Medicine',
-  'Arcade',
-  'Arts Venue',
-  'ATM',
-  'Bakery',
-  'Bank',
-  'Bar',
-  'Bike shop',
-  'Bookstore',
-  'Bowling Alley',
-  'Cafe',
-  'Campground',
-  'Car Dealer',
-  'Car Rental',
-  'Car Repair',
-  'Car Wash',
-  'Casino',
-  'Cell Phone Store',
-  'Cemetery',
-  'Charging Station',
-  'Clinic',
-  'Clothing Store',
-  'Community Center',
-  'Convenience Store',
-  'Counseling',
-  'Dentist',
-  'Dessert Shop',
-  'Discount Store',
-  'Dog Park',
-  'Dry Cleaning',
-  'Eye Care',
-  'Farmers Market',
-  'Fast Food',
-  'Fitness Center',
-  'Florist',
-  'Furniture Store',
-  'Garden Store',
-  'Gas Station',
-  'Golf Course',
-  'Government Office',
-  'Hair and Beauty',
-  'Hardware',
-  'Home Service',
-  'Hotel',
-  'Jewelry Store',
-  'Kindergarten',
-  'Laundromat',
-  'Legal Service',
-  'Library',
-  'Liquor Store',
-  'Marina',
-  'Market',
-  'Massage Therapy',
-  'Maternity Center',
-  'Mental Health',
-  'Movie Theater',
-  'Museum',
-  'Nightclub',
-  'Occupational Therapy',
-  'Park',
-  'Performing Arts',
-  'Pet Store',
-  'Pharmacy',
-  'Physical Therapy',
-  'Place of Worship',
-  'Playground',
-  'Post Office',
-  'Public Restroom',
-  'Public Safety',
-  'Real Estate',
-  'Recreation',
-  'Restaurant',
-  'School',
-  'Shoe Store',
-  'Shopping Center',
-  'Social Club',
-  'Specialty Store',
-  'Speech Therapist',
-  'Sports Outlet',
-  'Stadium',
-  'Supermarket',
-  'Swimming Pool',
-  'Thrift Store',
-  'Tire Store',
-  'University',
-  'Veterinarian',
-  'Wholesale Store',
-  // "Other" categories last, unchecked by default
-  'Other Amenity',
-  'Other Financial',
-  'Other Healthcare',
-  'Other Professional',
-  'Other Shop',
-]
+// Conflated shared_label categories — generated from match_radii.csv.
+// "Other *" entries are sorted last; App.vue uses that convention to leave
+// them unchecked by default.
+export const CONFLATED_LABELS = SHARED_LABELS
 
 // Foursquare L1 categories
 export const FSQ_CATEGORIES = [
