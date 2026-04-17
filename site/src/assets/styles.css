@@ -31,7 +31,6 @@ body,
   z-index: 100;
   flex-shrink: 0;
   flex-wrap: nowrap;
-  overflow: hidden;
 }
 
 /* Right-side group: About link + brand logo */
