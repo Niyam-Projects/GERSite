@@ -22,22 +22,36 @@ All four live at [src/openpois/conflation/data/](../../src/openpois/conflation/d
 
 OSM key priority order for label assignment: **shop > healthcare > leisure > amenity** (specific tags win over generic).
 
-## Regenerating the site's taxonomy page
+## Regenerating the site's taxonomy artifacts
 
-After editing any of the four CSVs:
+After editing any of the four CSVs, run:
 
 ```bash
 python scripts/build_taxonomy.py
 ```
 
-This renders [site/public/taxonomy.html](../../site/public/taxonomy.html) — an HTML table showing the full crosswalk + radii.
+This regenerates **both** generated outputs (both are gitignored):
 
-## Manual sync points
+1. [site/public/taxonomy.html](../../site/public/taxonomy.html) — user-facing HTML table showing the full crosswalk + radii.
+2. [site/src/taxonomy.generated.js](../../site/src/taxonomy.generated.js) — `SHARED_LABELS`, `OSM_KEYS`, `OVERTURE_L0S` arrays imported by [site/src/constants.js](../../site/src/constants.js).
 
-These are **not** automatic — forgetting them silently breaks the frontend:
+Then verify there's no drift:
 
-1. **`site/src/constants.js` `CONFLATED_LABELS`** must match the `shared_label` column in `match_radii.csv`. Adding or removing labels in the CSV requires an edit here. Noted in [site/README.md](../../site/README.md).
-2. **`site/public/taxonomy.html`** is generated — don't hand-edit; rerun `build_taxonomy.py`.
+```bash
+python scripts/check_taxonomy_sync.py   # exits 0 if clean
+pytest tests/test_taxonomy_sync.py      # same check, run in CI
+```
+
+The [sync-taxonomy](../skills/sync-taxonomy/SKILL.md) skill wraps this workflow.
+
+## Hand-maintained pieces
+
+Everything in [site/src/constants.js](../../site/src/constants.js) now derives from the generated arrays **except** the display-label maps:
+
+- `OSM_KEY_LABELS` — e.g. `amenity: 'Amenity'`, `tourism: 'Tourism'`.
+- `OVERTURE_L0_LABELS` — e.g. `food_and_drink: 'Food & Drink'`.
+
+When a new `osm_key` or `overture_l0` is added to the CSVs, `check_taxonomy_sync.py` prints a `WARN:` line pointing at any missing display-label entries. Missing entries fall back to the raw key — ugly but not broken.
 
 ## Upcoming Overture migration (~June 2026)
 

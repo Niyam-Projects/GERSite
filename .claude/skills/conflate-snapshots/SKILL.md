@@ -23,12 +23,9 @@ Taxonomy-aware matching between rated OSM and Overture, then partition and uploa
    - Component weights: `distance_weight`, `name_weight`, `type_weight`, `identifier_weight`
    - Changing these reshapes match counts — run with `--test` first (Seattle bbox).
 
-3. **Sync taxonomy if crosswalks changed** — see [docs/taxonomy-setup.md](../../docs/taxonomy-setup.md):
-   ```bash
-   python scripts/build_taxonomy.py   # regenerates site/public/taxonomy.html
-   ```
+3. **Sync taxonomy if crosswalks changed** — run the [sync-taxonomy](../sync-taxonomy/SKILL.md) skill. It regenerates `site/public/taxonomy.html` and `site/src/taxonomy.generated.js`, and detects drift in the hand-maintained display labels.
 
-4. **Run conflation** — ~15M POIs, ~16 GB RAM:
+4. **Run conflation** — ~22M POIs; peak RSS ~10 GB projected (actual peak prints at each phase via the `log_rss` lines in stdout; record the result here after each full run):
    ```bash
    python scripts/conflation/conflate.py            # full run
    python scripts/conflation/conflate.py --test     # Seattle bbox dry run

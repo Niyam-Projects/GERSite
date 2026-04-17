@@ -14,15 +14,15 @@ Vue 3 + Vite frontend lives in [site/](../../../site/). After a data pull + uplo
 
 ## Steps
 
-1. **Update S3 URLs in [site/src/constants.js](../../../site/src/constants.js)** — each source may have a different date:
+1. **Sync taxonomy** — run the [sync-taxonomy](../sync-taxonomy/SKILL.md) skill first. It regenerates `site/src/taxonomy.generated.js` and `site/public/taxonomy.html` from the conflation CSVs and checks `constants.js` for missing display labels. Catch drift before touching S3 URLs.
+
+2. **Update S3 URLs in [site/src/constants.js](../../../site/src/constants.js)** — each source may have a different date:
    - `OSM_S3_BASE` → `snapshots/osm/YYYYMMDD/osm_snapshot_partitioned`
    - `FSQ_S3_BASE` → `snapshots/foursquare/YYYYMMDD/foursquare_snapshot_partitioned`
    - `CONFLATED_S3_BASE` → `snapshots/conflated/YYYYMMDD/conflated_partitioned`
    - `OVERTURE_PMTILES_URL` → bump on monthly Overture release
 
-2. **Update hardcoded links in [site/public/about.html](../../../site/public/about.html)** — the S3 browse paths in the data-access section must match constants.js.
-
-3. **Sync category labels if taxonomy changed** — if `match_radii.csv` labels were added/removed, update `CONFLATED_LABELS` in `site/src/constants.js`. See [docs/taxonomy-setup.md](../../docs/taxonomy-setup.md).
+3. **Update hardcoded links in [site/public/about.html](../../../site/public/about.html)** — the S3 browse paths in the data-access section must match constants.js.
 
 4. **Local preview**:
    ```bash
