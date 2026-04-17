@@ -48,9 +48,9 @@ Downloads the three snapshot sources (50 US states + DC + PR) and applies the ra
 
 ## Verification
 
-Hand off to [skills/verify-pipeline-run](../verify-pipeline-run/SKILL.md). Baseline totals (as of 2026-04-16):
+Hand off to [skills/verify-pipeline-run](../verify-pipeline-run/SKILL.md). Baseline totals (as of 2026-04-17):
 - OSM: ~7.78M POIs
-- Overture: ~7.23M POIs
+- Overture: ~13.05M POIs (jumped from ~7.23M after widening `download.overture.taxonomy_allowlist` to include `services_and_business` + `lifestyle_services` sub-branches)
 - Foursquare: ~8.32M POIs
 
 Flag >5% drops — Foursquare in particular has had silent country-filter regressions (PR alpha-2 code quirk).

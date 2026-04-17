@@ -65,6 +65,13 @@ download:
     release_date: null  # null = auto-detect latest
     s3_bucket: "overturemaps-us-west-2"
     s3_region: "us-west-2"
+    # DuckDB resource caps for the per-part S3 scans and the final polygon
+    # filter. Peak host RAM ~= workers * memory_limit, peak CPU ~= workers *
+    # threads. Scale per-worker values down if raising workers above 1.
+    duckdb:
+      memory_limit: "4GB"
+      threads: 2
+      workers: 2
     # (L0, L1) allowlist. L1 = null means "all of this L0".
     # Entries intentionally exclude office/B2B-style L1s (corporate offices,
     # media services, etc.), transit/parking/airports (covered elsewhere), and

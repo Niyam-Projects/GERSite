@@ -34,8 +34,9 @@ Reference for every external data source openpois ingests. For the workflow that
 
 - **URL**: public S3 at `s3://overturemaps-us-west-2/`.
 - **Auth**: none (DuckDB + httpfs queries directly).
-- **Pipeline**: two-stage spatial filter — DuckDB `WHERE` clause ORs one disjunct per coarse bbox (predicate pushdown on Overture's `bbox` struct), then GeoPandas `sjoin(predicate='within')` against the exact US+PR polygon.
-- **Entry**: [src/openpois/io/overture.py](../../src/openpois/io/overture.py).
+- **Pipeline**: per-part resumable download → exact-polygon filter, all inside DuckDB. Each of the 16 `part-*.parquet` files streams through a fresh DuckDB connection into a local parquet intermediate under `.parts/<release>/`; coarse-bbox `WHERE` pushes down on Overture's `bbox` struct. Once every part is present, a final `COPY` applies `ST_Within` against the dissolved US+PR polygon and writes the GeoParquet. No pandas materialization; crashed runs resume by skipping existing intermediates.
+- **Entry**: [src/openpois/io/overture.py](../../src/openpois/io/overture.py). Returns a `Path`, not a `GeoDataFrame`.
+- **DuckDB version pin**: `environment.yml` pins `duckdb==1.4.1`. 1.4.4+ and every 1.5.x crash mid-scan on WSL2 with "Information loss on integer cast" in `HTTPFileSystem::ReadInternal` — tracked as DuckDB issue #21669, fix merged to main but not in any tagged release as of 2026-04-17. See [memory: project_duckdb_pin.md] for the bump checklist.
 - **Schema quirks (as of Feb 2026 schema)**:
   - `taxonomy` is a named STRUCT `{primary, hierarchy[], alternates[]}` — use `taxonomy.hierarchy[1]` **not** `taxonomy[1]`.
   - `brand` is a singular struct, **not** a `brands[]` array.

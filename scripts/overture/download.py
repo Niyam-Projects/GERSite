@@ -2,10 +2,12 @@
 Download the current US+PR Overture Maps Places snapshot as a GeoParquet file.
 
 Queries Overture Maps GeoParquet files on public S3 using DuckDB's httpfs and
-spatial extensions, filtering with a two-stage spatial filter (coarse bbox
-prefilter in the DuckDB query, then exact within-polygon filter in Python
-against the US+PR Census boundary) and by L0 taxonomy category. No
-authentication required — Overture Maps data is publicly accessible.
+spatial extensions. Iterates the release's ``part-*.parquet`` files, writing a
+bounded-memory DuckDB COPY per part into a ``.parts/<release>/`` directory.
+Once every part is present, a single DuckDB COPY applies the exact US+PR
+polygon filter and writes the final GeoParquet without materializing rows in
+Python. Interrupted runs resume by skipping parts whose intermediates already
+exist. No authentication required — Overture Maps data is publicly accessible.
 
 Auto-detects the latest available Overture release from S3 unless a specific
 release_date is pinned in config.yaml.
@@ -15,6 +17,9 @@ Config keys used (config.yaml):
     download.overture.s3_bucket              — Overture Maps S3 bucket name
     download.overture.s3_region              — AWS region of the Overture bucket
     download.overture.taxonomy_allowlist     — list of [L0, L1] pairs; L1 null = any
+    download.overture.duckdb.memory_limit    — per-connection DuckDB memory cap
+    download.overture.duckdb.threads         — per-connection DuckDB thread count
+    download.overture.duckdb.workers         — parallel part downloads (must be 1)
     download.general.boundary.source_url     — Census state-boundary zip URL
     download.general.boundary.coastline_buffer_m — outward coastline buffer (m)
     directories.boundary                     — cache directory for boundary file
@@ -25,6 +30,7 @@ Output file:
         Columns: overture_id, overture_name, taxonomy_l0, taxonomy_l1,
         taxonomy_l2, brand_name, confidence, geometry, source
 """
+import pyarrow.parquet as pq
 from config_versioned import Config
 from openpois.io.boundary import get_us_pr_boundary
 from openpois.io.overture import download_overture_snapshot
@@ -40,6 +46,15 @@ RELEASE_DATE = config.get("download", "overture", "release_date", fail_if_none=F
 S3_BUCKET = config.get("download", "overture", "s3_bucket")
 S3_REGION = config.get("download", "overture", "s3_region")
 TAXONOMY_ALLOWLIST = config.get("download", "overture", "taxonomy_allowlist")
+DUCKDB_MEMORY_LIMIT = config.get(
+    "download", "overture", "duckdb", "memory_limit", fail_if_none=False
+) or "4GB"
+DUCKDB_THREADS = config.get(
+    "download", "overture", "duckdb", "threads", fail_if_none=False
+) or 2
+DUCKDB_WORKERS = config.get(
+    "download", "overture", "duckdb", "workers", fail_if_none=False
+) or 2
 BOUNDARY_URL = config.get("download", "general", "boundary", "source_url")
 COASTLINE_BUFFER_M = config.get(
     "download", "general", "boundary", "coastline_buffer_m"
@@ -62,13 +77,17 @@ if __name__ == "__main__":
         cache_dir = BOUNDARY_DIR,
         coastline_buffer_m = COASTLINE_BUFFER_M,
     )
-    gdf = download_overture_snapshot(
-        output_path=OUTPUT_PATH,
-        taxonomy_allowlist=TAXONOMY_ALLOWLIST,
-        boundary_gdf=boundary_gdf,
-        coarse_bboxes=coarse_bboxes,
-        bucket=S3_BUCKET,
-        s3_region=S3_REGION,
-        release_date=RELEASE_DATE,
+    output_path = download_overture_snapshot(
+        output_path = OUTPUT_PATH,
+        taxonomy_allowlist = TAXONOMY_ALLOWLIST,
+        boundary_gdf = boundary_gdf,
+        coarse_bboxes = coarse_bboxes,
+        bucket = S3_BUCKET,
+        s3_region = S3_REGION,
+        release_date = RELEASE_DATE,
+        duckdb_memory_limit = DUCKDB_MEMORY_LIMIT,
+        duckdb_threads = DUCKDB_THREADS,
+        workers = DUCKDB_WORKERS,
     )
-    print(f"Saved {len(gdf):,} Overture POIs to {OUTPUT_PATH}")
+    n_rows = pq.read_metadata(output_path).num_rows
+    print(f"Saved {n_rows:,} Overture POIs to {output_path}")

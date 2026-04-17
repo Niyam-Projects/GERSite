@@ -12,14 +12,16 @@ so tests run without network access.
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
-import pandas as pd
 import pytest
 from shapely.geometry import box
 
+from openpois.io import overture as overture_module
 from openpois.io.overture import (
+    _list_overture_part_keys,
     build_overture_s3_path,
     download_overture_snapshot,
     get_latest_release_date,
@@ -50,12 +52,29 @@ _S3_XML_TWO_RELEASES = textwrap.dedent("""\
     </ListBucketResult>
 """)
 
-_S3_XML_EMPTY = textwrap.dedent("""\
+_S3_XML_EMPTY_RELEASES = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
     <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
       <Name>overturemaps-us-west-2</Name>
     </ListBucketResult>
 """)
+
+
+def _parts_xml(keys: list[str], truncated: bool = False) -> str:
+    """Build a minimal list-type=2 XML response listing the given keys."""
+    contents = "\n".join(
+        f"<Contents><Key>{k}</Key><Size>123</Size></Contents>"
+        for k in keys
+    )
+    truncated_str = "true" if truncated else "false"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\n'
+        "<Name>overturemaps-us-west-2</Name>\n"
+        f"<IsTruncated>{truncated_str}</IsTruncated>\n"
+        f"{contents}\n"
+        "</ListBucketResult>\n"
+    )
 
 
 def _mock_requests_response(text: str, status_code: int = 200) -> MagicMock:
@@ -77,7 +96,7 @@ class TestGetLatestReleaseDate:
         mock_resp = _mock_requests_response(_S3_XML_TWO_RELEASES)
 
         with patch(
-            "openpois.io.overture.requests.get", return_value=mock_resp
+            "openpois.io.overture.requests.get", return_value = mock_resp
         ):
             result = get_latest_release_date("overturemaps-us-west-2")
 
@@ -85,25 +104,25 @@ class TestGetLatestReleaseDate:
 
     def test_raises_value_error_when_no_prefixes(self):
         """Should raise ValueError when the S3 bucket lists no release prefixes."""
-        mock_resp = _mock_requests_response(_S3_XML_EMPTY)
+        mock_resp = _mock_requests_response(_S3_XML_EMPTY_RELEASES)
 
         with patch(
-            "openpois.io.overture.requests.get", return_value=mock_resp
+            "openpois.io.overture.requests.get", return_value = mock_resp
         ):
-            with pytest.raises(ValueError, match="No release prefixes found"):
+            with pytest.raises(ValueError, match = "No release prefixes found"):
                 get_latest_release_date("overturemaps-us-west-2")
 
     def test_raises_on_http_error(self):
         """Should propagate HTTPError from raise_for_status."""
         import requests as _req
 
-        mock_resp = _mock_requests_response("", status_code=403)
+        mock_resp = _mock_requests_response("", status_code = 403)
         mock_resp.raise_for_status = MagicMock(
-            side_effect=_req.HTTPError("403 Forbidden")
+            side_effect = _req.HTTPError("403 Forbidden")
         )
 
         with patch(
-            "openpois.io.overture.requests.get", return_value=mock_resp
+            "openpois.io.overture.requests.get", return_value = mock_resp
         ):
             with pytest.raises(_req.HTTPError):
                 get_latest_release_date("overturemaps-us-west-2")
@@ -113,7 +132,7 @@ class TestGetLatestReleaseDate:
         mock_resp = _mock_requests_response(_S3_XML_TWO_RELEASES)
 
         with patch(
-            "openpois.io.overture.requests.get", return_value=mock_resp
+            "openpois.io.overture.requests.get", return_value = mock_resp
         ) as mock_get:
             get_latest_release_date("my-bucket")
 
@@ -132,8 +151,8 @@ class TestBuildOvertureS3Path:
     def test_returns_expected_path_format(self):
         """Should embed bucket, release date, and place paths correctly."""
         result = build_overture_s3_path(
-            release_date="2026-02-18.0",
-            bucket="overturemaps-us-west-2",
+            release_date = "2026-02-18.0",
+            bucket = "overturemaps-us-west-2",
         )
         assert result == (
             "s3://overturemaps-us-west-2/release/2026-02-18.0"
@@ -143,11 +162,81 @@ class TestBuildOvertureS3Path:
     def test_different_bucket(self):
         """Should use whatever bucket name is supplied."""
         result = build_overture_s3_path(
-            release_date="2025-01-01.0",
-            bucket="custom-bucket",
+            release_date = "2025-01-01.0",
+            bucket = "custom-bucket",
         )
         assert result.startswith("s3://custom-bucket/")
         assert "2025-01-01.0" in result
+
+
+# ---------------------------------------------------------------------------
+# _list_overture_part_keys
+# ---------------------------------------------------------------------------
+
+
+class TestListOvertureParts:
+    _SAMPLE_KEYS = [
+        f"release/2026-02-18.0/theme=places/type=place/part-{i:05d}.parquet"
+        for i in range(3)
+    ]
+
+    def test_returns_sorted_parquet_keys(self):
+        """Should parse Contents/Key entries ending in .parquet, sorted."""
+        mock_resp = _mock_requests_response(
+            _parts_xml(self._SAMPLE_KEYS, truncated = False)
+        )
+        with patch(
+            "openpois.io.overture.requests.get", return_value = mock_resp
+        ):
+            keys = _list_overture_part_keys(
+                release_date = "2026-02-18.0",
+                bucket = "overturemaps-us-west-2",
+            )
+        assert keys == sorted(self._SAMPLE_KEYS)
+
+    def test_filters_non_parquet_keys(self):
+        """Non-.parquet keys in the listing should be dropped."""
+        mixed = self._SAMPLE_KEYS + [
+            "release/2026-02-18.0/theme=places/type=place/_SUCCESS"
+        ]
+        mock_resp = _mock_requests_response(
+            _parts_xml(mixed, truncated = False)
+        )
+        with patch(
+            "openpois.io.overture.requests.get", return_value = mock_resp
+        ):
+            keys = _list_overture_part_keys(
+                release_date = "2026-02-18.0",
+                bucket = "overturemaps-us-west-2",
+            )
+        assert all(k.endswith(".parquet") for k in keys)
+        assert len(keys) == len(self._SAMPLE_KEYS)
+
+    def test_raises_when_empty(self):
+        """Empty listing should raise ValueError."""
+        mock_resp = _mock_requests_response(_parts_xml([], truncated = False))
+        with patch(
+            "openpois.io.overture.requests.get", return_value = mock_resp
+        ):
+            with pytest.raises(ValueError, match = "No part Parquet files"):
+                _list_overture_part_keys(
+                    release_date = "2026-02-18.0",
+                    bucket = "overturemaps-us-west-2",
+                )
+
+    def test_raises_when_truncated(self):
+        """Truncated listing should raise (pagination not implemented)."""
+        mock_resp = _mock_requests_response(
+            _parts_xml(self._SAMPLE_KEYS, truncated = True)
+        )
+        with patch(
+            "openpois.io.overture.requests.get", return_value = mock_resp
+        ):
+            with pytest.raises(ValueError, match = "truncated"):
+                _list_overture_part_keys(
+                    release_date = "2026-02-18.0",
+                    bucket = "overturemaps-us-west-2",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -155,106 +244,328 @@ class TestBuildOvertureS3Path:
 # ---------------------------------------------------------------------------
 
 
-class TestDownloadOvertureSnapshot:
-    def _make_mock_conn(self, df: pd.DataFrame) -> MagicMock:
-        """Return a mock duckdb connection whose execute().df() returns df."""
-        conn = MagicMock()
-        # conn.execute() is called multiple times (INSTALL, LOAD, SET, query)
-        exec_result = MagicMock()
-        exec_result.df = MagicMock(return_value=df)
-        conn.execute = MagicMock(return_value=exec_result)
-        return conn
+def _fake_part_key(i: int, release: str = "2026-02-18.0") -> str:
+    return f"release/{release}/theme=places/type=place/part-{i:05d}.parquet"
 
-    def test_calls_duckdb_with_s3_path_and_bbox(self, tmp_path):
-        """DuckDB query should reference the S3 path and bbox filter values."""
+
+class TestDownloadOvertureSnapshot:
+    _PART_KEYS = [_fake_part_key(0), _fake_part_key(1)]
+
+    def _write_dummy_intermediate(self, path: Path) -> None:
+        path.parent.mkdir(parents = True, exist_ok = True)
+        path.write_bytes(b"dummy")
+
+    def test_calls_download_one_part_for_each_key(self, tmp_path):
+        """Should call _download_one_part once per listed part key."""
         output = tmp_path / "overture.parquet"
         coarse_bboxes = [
             {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
         ]
         boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0)
-        df = pd.DataFrame(
-            {
-                "source": ["overture"],
-                "overture_id": ["abc"],
-                "release_date": ["2026-02-18.0"],
-                "taxonomy_l0": ["eat_and_drink"],
-                "taxonomy_l1": [None],
-                "overture_name": ["Cafe"],
-                "brand_name": [None],
-                "confidence": [0.9],
-                "longitude": [-120.0],
-                "latitude": [37.0],
-            }
-        )
-        mock_conn = self._make_mock_conn(df)
 
-        with patch("openpois.io.overture.duckdb.connect", return_value=mock_conn), \
-             patch.object(
-                 gpd.GeoDataFrame, "to_parquet", return_value=None
-             ):
-            gdf = download_overture_snapshot(
-                output_path=output,
-                taxonomy_allowlist=[("eat_and_drink", None)],
-                boundary_gdf=boundary_gdf,
-                coarse_bboxes=coarse_bboxes,
-                bucket="overturemaps-us-west-2",
-                s3_region="us-west-2",
-                release_date="2026-02-18.0",
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ) as mock_list, patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ) as mock_download, patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
+        ) as mock_finalize:
+            result = download_overture_snapshot(
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = boundary_gdf,
+                coarse_bboxes = coarse_bboxes,
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = "2026-02-18.0",
             )
 
-        # Collect all SQL strings passed to conn.execute
-        sql_calls = [
-            str(c.args[0]) for c in mock_conn.execute.call_args_list if c.args
-        ]
-        final_query = sql_calls[-1]  # last call is the data query
-        assert "read_parquet" in final_query
-        assert "2026-02-18.0" in final_query
-        assert str(coarse_bboxes[0]["xmin"]) in final_query
-        assert "eat_and_drink" in final_query
+        assert result == output
+        mock_list.assert_called_once()
+        assert mock_download.call_count == len(self._PART_KEYS)
+        mock_finalize.assert_called_once()
+        assert output.exists()
 
-        assert len(gdf) == 1
-        assert gdf.crs.to_epsg() == 4326
+    def test_skips_existing_intermediates_on_resume(self, tmp_path):
+        """Pre-existing, non-empty intermediate should be skipped."""
+        output = tmp_path / "overture.parquet"
+        coarse_bboxes = [
+            {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+        ]
+        boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0)
+
+        release = "2026-02-18.0"
+        parts_dir = output.parent / ".parts" / release
+        parts_dir.mkdir(parents = True)
+        # Pre-populate the intermediate for the first part.
+        (parts_dir / "part-00000.parquet").write_bytes(b"already-here")
+
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ) as mock_download, patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
+        ):
+            download_overture_snapshot(
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = boundary_gdf,
+                coarse_bboxes = coarse_bboxes,
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = release,
+            )
+
+        # Only the second part should have been downloaded.
+        assert mock_download.call_count == 1
+        downloaded_path = mock_download.call_args.kwargs["intermediate_path"]
+        assert downloaded_path.name == "part-00001.parquet"
+
+    def test_cleans_up_parts_dir_on_success(self, tmp_path):
+        """On successful finalize, .parts/<release>/ should be removed."""
+        output = tmp_path / "overture.parquet"
+        release = "2026-02-18.0"
+        parts_dir = output.parent / ".parts" / release
+
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ), patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
+        ):
+            download_overture_snapshot(
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes = [
+                    {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+                ],
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = release,
+            )
+
+        assert not parts_dir.exists()
+
+    def test_leaves_intermediates_on_finalize_failure(self, tmp_path):
+        """If finalize raises, intermediates should remain for resume."""
+        output = tmp_path / "overture.parquet"
+        release = "2026-02-18.0"
+        parts_dir = output.parent / ".parts" / release
+
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def failing_finalize(**_kwargs):
+            raise RuntimeError("boom")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ), patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = failing_finalize,
+        ):
+            with pytest.raises(RuntimeError, match = "boom"):
+                download_overture_snapshot(
+                    output_path = output,
+                    taxonomy_allowlist = [("eat_and_drink", None)],
+                    boundary_gdf = _rect_boundary_gdf(
+                        -125.0, 24.0, -66.0, 50.0
+                    ),
+                    coarse_bboxes = [
+                        {"xmin": -125.0, "ymin": 24.0,
+                         "xmax": -66.0, "ymax": 50.0}
+                    ],
+                    bucket = "overturemaps-us-west-2",
+                    s3_region = "us-west-2",
+                    release_date = release,
+                )
+
+        assert parts_dir.exists()
+        intermediates = sorted(p.name for p in parts_dir.glob("part-*.parquet"))
+        assert intermediates == ["part-00000.parquet", "part-00001.parquet"]
 
     def test_fetches_latest_release_when_not_provided(self, tmp_path):
         """Should call get_latest_release_date when release_date is None."""
         output = tmp_path / "overture.parquet"
-        df = pd.DataFrame(
-            {
-                "source": [],
-                "overture_id": [],
-                "release_date": [],
-                "taxonomy_l0": [],
-                "taxonomy_l1": [],
-                "overture_name": [],
-                "brand_name": [],
-                "confidence": [],
-                "longitude": [],
-                "latitude": [],
-            }
-        )
-        mock_conn = self._make_mock_conn(df)
 
-        with (
-            patch(
-                "openpois.io.overture.duckdb.connect",
-                return_value=mock_conn,
-            ),
-            patch(
-                "openpois.io.overture.get_latest_release_date",
-                return_value="2026-02-18.0",
-            ) as mock_latest,
-            patch.object(gpd.GeoDataFrame, "to_parquet", return_value=None),
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "get_latest_release_date",
+            return_value = "2026-02-18.0",
+        ) as mock_latest, patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ), patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
         ):
             download_overture_snapshot(
-                output_path=output,
-                taxonomy_allowlist=[("eat_and_drink", None)],
-                boundary_gdf=_rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
-                coarse_bboxes=[
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes = [
                     {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
                 ],
-                bucket="overturemaps-us-west-2",
-                s3_region="us-west-2",
-                release_date=None,
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = None,
             )
 
-        mock_latest.assert_called_once_with(bucket="overturemaps-us-west-2")
+        mock_latest.assert_called_once_with(bucket = "overturemaps-us-west-2")
+
+    def test_per_part_sql_uses_single_file_s3_uri(self, tmp_path):
+        """Per-part SQL should reference a single S3 URI, not the glob."""
+        output = tmp_path / "overture.parquet"
+        captured_uris: list[str] = []
+
+        def capture_download_one_part(part_s3_uri, intermediate_path, **_kwargs):
+            captured_uris.append(part_s3_uri)
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = self._PART_KEYS,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = capture_download_one_part,
+        ), patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
+        ):
+            download_overture_snapshot(
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes = [
+                    {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+                ],
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = "2026-02-18.0",
+            )
+
+        assert captured_uris == [
+            f"s3://overturemaps-us-west-2/{k}" for k in self._PART_KEYS
+        ]
+        for uri in captured_uris:
+            assert "*" not in uri
+
+    def test_rejects_workers_lt_one(self, tmp_path):
+        """workers must be >= 1."""
+        with pytest.raises(ValueError, match = "workers must be >= 1"):
+            download_overture_snapshot(
+                output_path = tmp_path / "overture.parquet",
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes = [
+                    {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+                ],
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = "2026-02-18.0",
+                workers = 0,
+            )
+
+    def test_parallel_workers_download_all_parts(self, tmp_path):
+        """workers > 1 should still result in every part being downloaded."""
+        output = tmp_path / "overture.parquet"
+        many_keys = [_fake_part_key(i) for i in range(4)]
+
+        def fake_download_one_part(intermediate_path, **_kwargs):
+            self._write_dummy_intermediate(intermediate_path)
+
+        def fake_finalize(output_path, **_kwargs):
+            Path(output_path).write_bytes(b"final")
+
+        with patch.object(
+            overture_module,
+            "_list_overture_part_keys",
+            return_value = many_keys,
+        ), patch.object(
+            overture_module,
+            "_download_one_part",
+            side_effect = fake_download_one_part,
+        ) as mock_download, patch.object(
+            overture_module,
+            "_finalize_snapshot_in_duckdb",
+            side_effect = fake_finalize,
+        ):
+            download_overture_snapshot(
+                output_path = output,
+                taxonomy_allowlist = [("eat_and_drink", None)],
+                boundary_gdf = _rect_boundary_gdf(-125.0, 24.0, -66.0, 50.0),
+                coarse_bboxes = [
+                    {"xmin": -125.0, "ymin": 24.0, "xmax": -66.0, "ymax": 50.0}
+                ],
+                bucket = "overturemaps-us-west-2",
+                s3_region = "us-west-2",
+                release_date = "2026-02-18.0",
+                workers = 3,
+            )
+
+        assert mock_download.call_count == len(many_keys)
+        assert output.exists()
