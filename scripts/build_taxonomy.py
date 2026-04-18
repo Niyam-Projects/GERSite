@@ -201,7 +201,16 @@ def render(rows):
       border: 1px solid #e5e7eb;
       border-radius: 6px;
       overflow: hidden;
+      table-layout: fixed;
     }}
+
+    .tx-table th:nth-child(1),
+    .tx-table td:nth-child(1) {{ width: 16%; }}
+
+    .tx-table th:nth-child(2),
+    .tx-table td:nth-child(2),
+    .tx-table th:nth-child(3),
+    .tx-table td:nth-child(3) {{ width: 42%; word-break: break-word; }}
 
     .tx-table th {{
       background: #f3f4f6;
