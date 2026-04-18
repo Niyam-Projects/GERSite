@@ -2,10 +2,10 @@
 versions:
   osm_data: "20260416"
   model_output: "20260416_by_leisure"
-  snapshot_osm: "20260416"
+  snapshot_osm: "20260417"
   snapshot_overture: "20260417"
   snapshot_foursquare: "20260416"
-  aws: "20260416"
+  aws: "20260417"
   conflation: "20260417"
 
 # Settings for downloading data
