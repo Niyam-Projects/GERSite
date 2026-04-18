@@ -57,3 +57,13 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 ## Config gotcha worth surfacing
 
 `config_versioned.Config.get()` raises `ValueError` on null values. For optional fields (e.g., `release_date: null`), pass `fail_if_none=False`. Prefer `config.get_file_path(section, file_key)` over composing `get_dir_path()` + `get()` manually.
+
+## Running long workflows
+
+When kicking off a long-running pipeline (downloads, rating, conflation, upload), stream stdout to a file you can tail at any time — don't rely on piping through `head`/`tail` or on the background-task's captured-output file, since Python output may stay buffered for long stretches. Prefer:
+
+```bash
+python -u scripts/... 2>&1 | tee ~/data/openpois/logs/<step>_<version>.log
+```
+
+`python -u` disables output buffering; `tee` lets the shell and a tail watcher both see output in real time.
