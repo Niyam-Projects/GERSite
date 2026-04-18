@@ -41,30 +41,34 @@ def osm_cell(group):
 
 
 def overture_cell(group):
-    """Format Overture categories for one shared_label."""
-    parts = []
+    """Format Overture categories for one shared_label.
+
+    Entries are sorted shallowest-first so parent-only rows precede their
+    more specific siblings (e.g. `health_care: acupuncture` above
+    `health_care > acupuncture: alternative_medicine`).
+    """
+    entries = []
     for _, row in group.iterrows():
         l0 = row["overture_l0"]
         l1 = row.get("overture_l1", "")
         l2 = row.get("overture_l2", "")
+        l1 = l1 if pd.notna(l1) and l1 != "" else None
+        l2 = l2 if pd.notna(l2) and l2 != "" else None
+        depth = (1 if l1 else 0) + (1 if l2 else 0)
         if l1 and l2:
-            parts.append(
+            html = (
                 f'<span class="tx-key">{l0} &rsaquo;'
                 f' {l1}:</span> {l2}'
             )
         elif l1:
-            parts.append(
-                f'<span class="tx-key">{l0}:</span> {l1}'
-            )
+            html = f'<span class="tx-key">{l0}:</span> {l1}'
         elif l2:
-            parts.append(
-                f'<span class="tx-key">{l0}:</span> {l2}'
-            )
+            html = f'<span class="tx-key">{l0}:</span> {l2}'
         else:
-            parts.append(
-                f'<span class="tx-key">{l0}</span>'
-            )
-    return "<br>".join(parts)
+            html = f'<span class="tx-key">{l0}</span>'
+        entries.append((depth, l0, l1 or "", l2 or "", html))
+    entries.sort(key = lambda e: (e[0], e[1], e[2], e[3]))
+    return "<br>".join(e[4] for e in entries)
 
 
 def build_rows(radii, osm, overture):
