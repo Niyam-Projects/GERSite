@@ -42,6 +42,7 @@ def random_markov_chain(
     """
     if key is None:
         key = jax_rng()
+
     @jax.jit
     def one_step(state, key):
         state, _ = kernel(key, state)

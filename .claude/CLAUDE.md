@@ -39,7 +39,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 |---|---|
 | [src/openpois/io/](../src/openpois/io/) | I/O adapters: OSM history/snapshot, Overture, Foursquare, Census boundary |
 | [src/openpois/osm/](../src/openpois/osm/) | OSM-specific transforms: `format_observations`, `change_plots` |
-| [src/openpois/models/](../src/openpois/models/) | PyTorch empirical Bayes: `EventRate`, `ModelFitter`, model registry |
+| [src/openpois/models/](../src/openpois/models/) | JAX/BlackJAX empirical Bayes: `ModelFitter`, model registry |
 | [src/openpois/conflation/](../src/openpois/conflation/) | OSM×Overture matching: `taxonomy`, `match`, `merge` |
 | [scripts/](../scripts/) | End-to-end pipelines using config.yaml — not installed, reference only |
 | [site/](../site/) | Vue 3 + Vite frontend |

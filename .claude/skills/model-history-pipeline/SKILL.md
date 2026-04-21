@@ -31,7 +31,7 @@ End-to-end: Geofabrik full-history PBFs → observations table → fitted λ →
    ```bash
    python scripts/models/osm_turnover.py
    ```
-   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv`, `fitted_model.pt` to `{date}_by_{group_key}` (or `{date}_constant`) under `directories.model_output.path`.
+   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv`, `fitted_model.pkl` to `{date}_by_{group_key}` (or `{date}_constant`) under `directories.model_output.path`.
 
 4. **Apply predictions to the OSM snapshot** → `osm_snapshot_rated.parquet`
    ```bash
@@ -51,5 +51,5 @@ Hand off to [skills/verify-pipeline-run](../verify-pipeline-run/SKILL.md) — in
 
 - Entry: [src/openpois/io/osm_history_pbf.py](../../../src/openpois/io/osm_history_pbf.py) (`download_osm_history`)
 - Entry: [src/openpois/osm/format_observations.py](../../../src/openpois/osm/format_observations.py)
-- Entry: [src/openpois/models/](../../../src/openpois/models/) — `ModelFitter`, `EventRate`, `pytorch_setup`
+- Entry: [src/openpois/models/](../../../src/openpois/models/) — `ModelFitter` (JAX/BlackJAX), model classes
 - Registry: [src/openpois/models/osm_models.py](../../../src/openpois/models/osm_models.py) — `MODEL_REGISTRY`, `get_model_class`

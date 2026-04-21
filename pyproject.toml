@@ -48,7 +48,6 @@ disable = [
     "C0114",   # missing-module-docstring
     "C0115",   # missing-class-docstring
     "C0116",   # missing-function-docstring
-    "E1102",   # not-callable: false positive for torch.linalg functions
     "R0902",   # too-many-instance-attributes: legitimate for model state classes
     "R0913",   # too-many-arguments: common in data science APIs
     "R0914",   # too-many-locals: acceptable in complex data processing functions

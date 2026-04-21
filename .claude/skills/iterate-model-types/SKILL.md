@@ -21,7 +21,7 @@ Rerun just the modeling step (step 3 of the full pipeline) for a fixed source-da
    - `{date}_constant` for the single-rate baseline
 
 3. **Edit `osm_turnover_model`** in `config.yaml`:
-   - `model_type`: one of `constant`, `random_by_type`, `pseudo_varying` (registry at [src/openpois/models/osm_models.py](../../../src/openpois/models/osm_models.py))
+   - `model_type`: one of `constant`, `random_by_type` (registry at [src/openpois/models/osm_models.py](../../../src/openpois/models/osm_models.py))
    - `group_key`: column to group by (e.g., `leisure_last_value`, `shop`, `amenity`). Null for constant.
    - `group_values`: restrict to specific values, or null for all
    - `min_value_count`: drop groups below this count

@@ -1,5 +1,5 @@
 """
-Simulation test for ModelFitterJAX.
+Simulation test for ModelFitter.
 
 Generates data that matches the model's likelihood -- one Bernoulli trial per
 observation with P(y=1) = 1 - exp(-lambda * dt) -- and checks that NUTS
@@ -13,7 +13,7 @@ import numpy as np
 from jax.scipy import stats
 
 from openpois.models.jax_core import jax_rng
-from openpois.models.model_fitter import ModelFitterJAX
+from openpois.models.model_fitter import ModelFitter
 
 
 NUM_DRAWS = 500
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     train = simulate_poi_data(key_train, N_TRAIN, TRUE_LOG_LAMBDA)
     test = simulate_poi_data(key_test, N_TEST, TRUE_LOG_LAMBDA)
 
-    fitter = ModelFitterJAX(
+    fitter = ModelFitter(
         event_rate_fun = event_rate_fun,
         starting_params = {"log_lambda": jnp.array(0.0)},
         data = {"dt": train["dt"]},

@@ -70,7 +70,7 @@ The core workflow models how long POI tags remain stable over time using histori
 ```bash
 python exploratory/osm_data/download.py       # Download OSM history for a bounding box
 python exploratory/osm_data/format_tabular.py # Format into observation records
-python exploratory/models/pytorch_simple.py   # Fit Poisson change-rate model
+python scripts/models/osm_turnover.py         # Fit Poisson change-rate model (JAX)
 ```
 
 ---

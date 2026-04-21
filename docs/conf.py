@@ -28,7 +28,9 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # Mock heavy imports so Sphinx can parse docstrings without installing the
 # full conda environment in CI.
 autodoc_mock_imports = [
-    "torch",
+    "jax",
+    "jaxlib",
+    "blackjax",
     "numpy",
     "pandas",
     "geopandas",

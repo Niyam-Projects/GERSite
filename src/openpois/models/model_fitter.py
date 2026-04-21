@@ -19,7 +19,7 @@ import pandas as pd
 from openpois.models.jax_core import jax_rng, nuts_sample
 
 
-class ModelFitterJAX:
+class ModelFitter:
     """
     Fitter for POI change-rate models using BlackJAX NUTS.
     """

@@ -103,13 +103,13 @@ See :mod:`openpois.osm.format_observations`.
 
    python scripts/models/osm_turnover.py
 
-Fits an empirical Bayes PyTorch model (constant or random-effects by type)
-estimating the Poisson change rate λ per group. Outputs ``fitted_params.csv``
-and ``predictions.csv`` (and optionally ``param_draws.csv`` /
-``fitted_model.pt``).
+Fits an empirical Bayes JAX model (constant or random-effects by type)
+estimating the Poisson change rate λ per group via BlackJAX NUTS. Outputs
+``fitted_params.csv`` and ``predictions.csv`` (and optionally
+``param_draws.csv`` / ``fitted_model.pkl``).
 
-See :mod:`openpois.models.model_fitter`, :mod:`openpois.models.setup`, and
-:mod:`openpois.models.event_rate`.
+See :mod:`openpois.models.model_fitter`, :mod:`openpois.models.osm_models`,
+and :mod:`openpois.models.setup`.
 
 **Step 4 — Visualise stability curves** *(optional)*
 

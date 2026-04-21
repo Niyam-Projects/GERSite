@@ -1,7 +1,7 @@
 # Versioned directories (used with config.get_dir_path())
 versions:
   osm_data: "20260416"
-  model_output: "20260416_by_leisure"
+  model_output: "20260421_constant"
   snapshot_osm: "20260417"
   snapshot_overture: "20260417"
   snapshot_foursquare: "20260416"
@@ -128,12 +128,12 @@ osm_data:
   apply_model:
     model_stub: '20260416'
 
-# Settings for exploratory/models/pytorch_simple.py
+# Settings for scripts/models/osm_turnover.py (JAX turnover model)
 osm_turnover_model:
-  model_type: random_by_type
+  model_type: constant
   tag_key: name
   var_prior: [-1.0, 5.0]
-  group_key: leisure_last_value
+  group_key: null
   group_values: null
   min_value_count: 5
   n_draws: 250
@@ -168,7 +168,7 @@ directories:
       fitted_params: fitted_params.csv
       param_draws: param_draws.csv
       predictions: predictions.csv
-      fitted_model: fitted_model.pt
+      fitted_model: fitted_model.pkl
   snapshot_foursquare:
     versioned: true
     path: ~/data/openpois/snapshots/foursquare

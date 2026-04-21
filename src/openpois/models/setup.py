@@ -1,32 +1,8 @@
 """
-Prepare environment for OpenPOI models.
+Data-preparation helpers for OSM turnover models.
 """
 
 import pandas as pd
-import torch
-import torch_continuum as tc
-
-
-def pytorch_setup(optimize_level: str = 'fast', verbose: bool = False) -> str:
-    """
-    Set up PyTorch and torch_continuum for OpenPOI models.
-
-    Args:
-        optimize_level: Optimization level for torch_continuum.
-            'safe': No precision impact
-            'fast': Minor optimization (default).
-            'max': High optimization, best for LLMs or large transformers.
-
-    Returns:
-        str: Device name.
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if verbose:
-        print("Running on", device)
-    torch.set_default_device(device)
-    torch.set_default_dtype(torch.float64)
-    tc.optimize(optimize_level, verbose = verbose)
-    return device
 
 
 def prepare_data_for_model(
@@ -43,8 +19,8 @@ def prepare_data_for_model(
     Optionally filters to rows belonging to IDs that have the group_key
     present, subsets to specific group values, and drops groups below a
     minimum observation count. Converts timestamp columns to datetime and
-    computes tag_days / tag_years elapsed columns. Drops rows with missing
-    tag_years or changed, and rows with tag_years <= 1e-6.
+    computes ``tag_days`` / ``tag_years`` elapsed columns. Drops rows with
+    missing ``tag_years`` or ``changed``, and rows with ``tag_years <= 1e-6``.
 
     Args:
         data: Observations DataFrame as returned by format_observations.
@@ -58,10 +34,11 @@ def prepare_data_for_model(
         t2_col: Name of the end-time timestamp column.
 
     Returns:
-        Filtered DataFrame with additional tag_days and tag_years columns.
+        Filtered DataFrame with additional ``tag_days`` and ``tag_years``
+        columns.
 
     Raises:
-        ValueError: If t1_col or t2_col are not present in data.
+        ValueError: If ``t1_col`` or ``t2_col`` is not present in data.
     """
     if group_key is not None:
         keep_ids = data.dropna(subset = [group_key]).id.unique().tolist()  # noqa: F841
@@ -82,11 +59,13 @@ def prepare_data_for_model(
     # Prepare timestamps
     if any(col not in data.columns for col in [t1_col, t2_col]):
         raise ValueError("Timestamp columns are missing from the data.")
+    data = data.copy()
     for timestamp_col in [t1_col, t2_col]:
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
+    tag_days = (data[t2_col] - data[t1_col]).dt.days
     data = data.assign(
-        tag_days = (pd.col(t2_col) - pd.col(t1_col)).dt.days,
-        tag_years = pd.col('tag_days') / 365,
+        tag_days = tag_days,
+        tag_years = tag_days / 365,
     )
     data = (
         data

@@ -32,7 +32,7 @@ Flag >5% drops. Known regression patterns:
   fitted_params.csv     # λ and σ per group
   param_draws.csv       # uncertainty bounds
   predictions.csv       # predictions per POI
-  fitted_model.pt       # torch state
+  fitted_model.pkl      # pickled JAX ModelFitter
 ```
 
 Checks:
