@@ -4,320 +4,200 @@
 #   -------------------------------------------------------------
 
 """
-This module contains a fitter for POI change models.
+Fit POI-change models in JAX.
+
+The likelihood is Bernoulli on a binary change indicator, with
+P(change) = 1 - exp(-rate) derived from a Poisson event rate.
 """
 
-import torch
-import torchmin
+import jax
+import jax.numpy as jnp
+import jax.random as jrd
+import numpy as np
 import pandas as pd
-from functools import partial
 
-from openpois.models.event_rate import EventRate
+from openpois.models.jax_core import jax_rng, nuts_sample
 
 
-class ModelFitter:
+class ModelFitterJAX:
     """
-    Fitter for POI change rate models.
+    Fitter for POI change-rate models using BlackJAX NUTS.
     """
 
-    # Small epsilon to avoid log(0) and log(1-p) = -inf -> NaN
-    EPSILON = 1e-7
-    # Model fit tolerance
-    TOLERANCE = 1e-7
-    # Optimizer type
-    OPTIMIZER = 'l-bfgs'
+    EPSILON = 1e-6
 
     def __init__(
         self,
-        event_rate_type: str,
         event_rate_fun: callable,
-        params: torch.Tensor,
-        data: dict[str, torch.Tensor],
-        target: torch.Tensor,
-        t1: torch.Tensor,
-        t2: torch.Tensor,
+        starting_params: dict[str, jnp.ndarray],
+        data: dict[str, jnp.ndarray],
+        target: jnp.ndarray,
+        num_draws: int = 1_000,
         param_likelihood: callable | None = None,
-        verbose: bool = False
+        rng_key: jrd.KeyArray | None = None,
+        verbose: bool = False,
     ):
         """
         Args:
-            observations: DataFrame of observations.
-            event_rate: EventRate object.
-            params: Parameters to fit.
-            data: Observations and covariates to use in the model.
-            target: Target variable to predict.
-            t1: Start time of the time period.
-            t2: End time of the time period.
+            event_rate_fun: Callable ``(params, data) -> rates`` returning a
+                Poisson event rate per observation. ``data`` should bundle any
+                covariates plus time bounds (e.g. ``t1``, ``t2``) the function
+                needs.
+            starting_params: Initial position for NUTS, as a pytree (dict) of
+                arrays matching the signature expected by ``event_rate_fun``.
+            data: Dict of arrays consumed by ``event_rate_fun``.
+            target: Binary change indicator per observation.
+            num_draws: Number of warmup steps and posterior draws.
+            param_likelihood: Optional ``(params) -> log_prior`` contribution
+                added to the Bernoulli log-likelihood.
+            rng_key: JAX PRNG key. Defaults to a fresh key from ``jax_rng()``.
+            verbose: Reserved for future use.
         """
-        self.event_rate = EventRate(
-            type = event_rate_type,
-            fun = event_rate_fun
-        )
-        self.param_likelihood = param_likelihood
-        self.starting_params = params
+        self.event_rate_fun = event_rate_fun
+        self.starting_params = starting_params
         self.data = data
         self.target = target
-        self.t1 = t1
-        self.t2 = t2
+        self.num_draws = num_draws
+        self.param_likelihood = param_likelihood
+        self.rng_key = rng_key if rng_key is not None else jax_rng()
         self.verbose = verbose
-        self.model_finished = False
-        self.model_fit = None
-        self.fitted_params = None
-        self.fitted_probs = None
-        self.hessian = None
         self.param_draws = None
+        self.model_finished = False
 
-    def calculate_change_rates(
+    def calculate_probs(
         self,
-        params: torch.Tensor,
-        data: dict[str, torch.Tensor] = {},
-        t1: torch.Tensor = None,
-        t2: torch.Tensor = None,
-        **kwargs
-    ):
+        params: dict[str, jnp.ndarray],
+        data: dict[str, jnp.ndarray],
+    ) -> jnp.ndarray:
         """
-        Calculate change rates for all observations given params.
-
-        Args:
-            params: Parameter tensor to evaluate.
-            data: Dict of covariate tensors. Defaults to self.data.
-            t1: Start times. Defaults to self.t1.
-            t2: End times. Defaults to self.t2.
-            **kwargs: Additional keyword arguments forwarded to event_rate.
-
-        Returns:
-            Tensor of change rates for each observation.
+        Map parameters + data to change probabilities in (EPSILON, 1 - EPSILON).
         """
-        if t1 is None:
-            t1 = self.t1
-        if t2 is None:
-            t2 = self.t2
-        return self.event_rate.calculate_change(
-            t1 = t1,
-            t2 = t2,
-            params = params,
-            **data,
-            **kwargs,
-        )
+        change_rates = self.event_rate_fun(params, data)
+        probs = 1.0 - jnp.exp(-change_rates)
+        return jnp.clip(probs, self.EPSILON, 1.0 - self.EPSILON)
 
-    def calculate_probs(self, params: torch.Tensor, **kwargs):
+    def calculate_lp(self, params: dict[str, jnp.ndarray]) -> jnp.ndarray:
         """
-        Calculate change probabilities for all observations given params.
+        Log-posterior density at ``params`` given ``self.data``/``self.target``.
 
-        Args:
-            params: Parameter tensor to evaluate.
-            **kwargs: Additional keyword arguments forwarded to
-                calculate_change_rates.
-
-        Returns:
-            Tensor of change probabilities clamped to (EPSILON, 1 - EPSILON).
+        Bernoulli likelihood on the binary change indicator plus the optional
+        ``param_likelihood`` log-prior contribution.
         """
-        change_rates = self.calculate_change_rates(params = params, **kwargs)
-        discount = torch.tensor(
-            0.05,
-            device = change_rates.device,
-            dtype = change_rates.dtype
-        )
-        probs = (
-            (1.0 - (1 - discount) * torch.exp(-1.0 * change_rates))
-            .squeeze(-1)
-            .clamp(min=self.EPSILON, max=1.0 - self.EPSILON)
-        )
-        return probs
-
-    def calculate_nll(self, params: torch.Tensor, **kwargs):
-        """
-        Calculate the negative log-likelihood for the given params.
-
-        Args:
-            params: Parameter tensor to evaluate.
-            **kwargs: Additional keyword arguments forwarded to calculate_probs.
-
-        Returns:
-            Scalar tensor representing the negative log-likelihood.
-        """
-        probs = self.calculate_probs(params = params, **kwargs)
-        ll = torch.sum(
-            self.target * torch.log(probs) +
-            (1.0 - self.target) * torch.log(1.0 - probs)
+        probs = self.calculate_probs(params, self.data)
+        lp = jnp.sum(
+            self.target * jnp.log(probs)
+            + (1.0 - self.target) * jnp.log(1.0 - probs)
         )
         if self.param_likelihood is not None:
-            ll += self.param_likelihood(params)
-        return -1.0 * ll
+            lp = lp + self.param_likelihood(params)
+        return lp
 
     def fit(self):
         """
-        Fit the model using L-BFGS optimization.
+        Draw posterior samples via BlackJAX NUTS with window adaptation.
 
-        Minimizes the negative log-likelihood with respect to self.starting_params.
-        Sets self.fitted_params, self.fitted_probs, and self.model_finished.
+        Stores draws on ``self.param_draws`` as a pytree matching
+        ``starting_params`` where each leaf has a leading draw axis.
         """
-        nll_partial = partial(self.calculate_nll, data = self.data)
-        self.model_fit = torchmin.minimize(
-            fun = nll_partial,
-            x0 = self.starting_params,
-            method = self.OPTIMIZER,
-            tol = self.TOLERANCE,
-            disp = 2 if self.verbose else 0
-        )
-        self.fitted_params = self.model_fit.x
-        self.fitted_probs = self.calculate_probs(
-            params = self.fitted_params,
-            data = self.data,
+        self.param_draws = nuts_sample(
+            log_density = self.calculate_lp,
+            init_position = self.starting_params,
+            num_draws = self.num_draws,
+            key = self.rng_key,
         )
         self.model_finished = True
 
-    def generate_parameter_draws(self, n_draws: int, seed: int | None = None):
+    def get_parameter_draws(self) -> dict[str, jnp.ndarray]:
         """
-        Using a Gaussian approximation to the posterior, generate N parameter draws.
-
-        The precision matrix (Hessian of the negative log-likelihood at the MLE) is
-        Cholesky-decomposed. Draws are generated as
-        theta = theta_hat + L^{-T} z,  z ~ N(0, I),
-        so that Cov(theta) = (L L^T)^{-1} = Hessian^{-1}.
-
-        Args:
-            n_draws: Number of posterior draws to generate.
-            seed: Optional RNG seed for reproducibility.
-
-        Returns:
-            Tensor of shape (n_params, n_draws) where each row corresponds to one
-            parameter and each column corresponds to a posterior draw.
-        """
-        if not self.model_finished:
-            raise ValueError("Run fit() first")
-        if self.hessian is None:
-            nll_partial = partial(self.calculate_nll, data = self.data)
-            self.hessian = torch.autograd.functional.hessian(
-                func = nll_partial,
-                inputs = self.fitted_params,
-            )
-        if seed is not None:
-            torch.manual_seed(seed)
-        # Precision = Hessian; Cholesky: precision = L @ L.T (lower triangular L)
-        L_prec = torch.linalg.cholesky(self.hessian)
-        n_params = self.fitted_params.shape[0]
-        z = torch.randn(
-            n_draws,
-            n_params,
-            device = self.hessian.device,
-            dtype = self.hessian.dtype
-        )
-        # theta = mu + (L^{-T} @ z.T).T  so each draw is mu + inv(L.T) @ z_i
-        solves = torch.linalg.solve(
-            A = L_prec.T.unsqueeze(0).expand(n_draws, -1, -1),
-            B = z.unsqueeze(-1),
-        )
-        draws = self.fitted_params.unsqueeze(1) + solves.squeeze(-1).transpose(0, 1)
-        self.param_draws = draws
-
-    def get_parameter_draws(self):
-        """
-        Return the previously generated parameter draw tensor.
-
-        Returns:
-            Tensor of shape (n_params, n_draws).
+        Return the posterior parameter draws as a pytree.
 
         Raises:
-            ValueError: If generate_parameter_draws() has not been run yet.
+            ValueError: If ``fit()`` has not been run yet.
         """
         if self.param_draws is None:
-            raise ValueError("Run generate_parameter_draws() first")
+            raise ValueError("Run fit() first")
         return self.param_draws
 
-    def _to_table(self, x):
+    def get_parameter_table(self, ui_width: float = 0.95) -> pd.DataFrame:
         """
-        Helper function to convert a tensor to a numpy array.
-        """
-        return x.data.cpu().numpy().reshape(-1)
+        Summarize posterior draws as one row per scalar parameter.
 
-    def get_parameter_table(
-        self,
-        ui_width: float = 0.95,
-    ):
-        """
-        Return a summary table of parameter draws.
+        Vector/matrix parameters are unrolled with ``name[i]`` / ``name[i,j]``
+        labels.
 
         Args:
-            ui_width: Width of the uncertainty interval. Must be in (0, 1).
+            ui_width: Width of the uncertainty interval, in (0, 1).
 
         Returns:
-            DataFrame with columns 'mean', 'lower', 'upper', one row per
-            parameter.
-
-        Raises:
-            ValueError: If generate_parameter_draws() has not been run, or
-                if ui_width is outside (0, 1).
+            DataFrame with columns ``parameter``, ``mean``, ``lower``, ``upper``.
         """
         if self.param_draws is None:
-            raise ValueError("Run generate_parameter_draws() first")
-        if (ui_width < 0.0) or (ui_width > 1.0):
+            raise ValueError("Run fit() first")
+        if not (0.0 < ui_width < 1.0):
             raise ValueError("ui_width must be between 0 and 1")
-        lb = (1.0 - ui_width) / 2
+        lb = (1.0 - ui_width) / 2.0
         ub = 1.0 - lb
-        return pd.DataFrame(
-            {
-                'mean': self._to_table(self.param_draws.mean(dim = 1)),
-                'lower': self._to_table(
-                    self.param_draws.quantile(q = lb, dim = 1)
-                ),
-                'upper': self._to_table(
-                    self.param_draws.quantile(q = ub, dim = 1)
-                ),
-            }
-        )
+
+        rows = []
+        for name, draws in self.param_draws.items():
+            draws_np = np.asarray(draws)
+            n_draws = draws_np.shape[0]
+            flat = draws_np.reshape(n_draws, -1)
+            param_shape = draws_np.shape[1:]
+            for i in range(flat.shape[1]):
+                if len(param_shape) == 0:
+                    label = name
+                else:
+                    idx = np.unravel_index(i, param_shape)
+                    label = f"{name}[{','.join(str(k) for k in idx)}]"
+                col = flat[:, i]
+                rows.append({
+                    "parameter": label,
+                    "mean": float(np.mean(col)),
+                    "lower": float(np.quantile(col, lb, method = "linear")),
+                    "upper": float(np.quantile(col, ub, method = "linear")),
+                })
+        return pd.DataFrame(rows)
 
     def predict(
         self,
-        t1: torch.Tensor = None,
-        t2: torch.Tensor = None,
-        data: dict[str, torch.Tensor] = {},
+        data: dict[str, jnp.ndarray] | None = None,
         ui_width: float = 0.95,
-        **kwargs
-    ):
+    ) -> pd.DataFrame:
         """
-        Generate change probability predictions using posterior parameter draws.
+        Posterior-predictive change probabilities.
 
-        If t1, t2, and data are all omitted, uses the training data stored on
-        self. If only t2 is provided, t1 defaults to zeros.
+        Vmaps ``calculate_probs`` over the stacked posterior draws in
+        ``self.param_draws``.
 
         Args:
-            t1: Start times tensor. Defaults to self.t1 when t2/data are also
-                omitted; otherwise zeros matching t2.
-            t2: End times tensor.
-            data: Dict of covariate tensors.
-            ui_width: Width of the uncertainty interval. Must be in (0, 1).
-            **kwargs: Additional keyword arguments forwarded to calculate_probs.
+            data: Dict of arrays with the same keys as ``self.data``. Defaults
+                to ``self.data``.
+            ui_width: Width of the uncertainty interval, in (0, 1).
 
         Returns:
-            DataFrame with columns t1, t2, p_mean, p_lower, p_upper.
-
-        Raises:
-            ValueError: If generate_parameter_draws() has not been run.
+            DataFrame with one row per observation and columns
+            ``p_mean``, ``p_lower``, ``p_upper``.
         """
         if self.param_draws is None:
-            raise ValueError("Run generate_draws() first")
-        if (t1 is None) and (t2 is None) and (len(data) == 0):
-            t1 = self.t1
-            t2 = self.t2
+            raise ValueError("Run fit() first")
+        if not (0.0 < ui_width < 1.0):
+            raise ValueError("ui_width must be between 0 and 1")
+        if data is None:
             data = self.data
-        elif t1 is None:
-            t1 = torch.zeros_like(t2)
-        probs = self.calculate_probs(
-            params = self.param_draws,
-            t1 = t1,
-            t2 = t2,
-            data = data,
-            **kwargs,
-        )
-        lb = (1.0 - ui_width) / 2
+
+        def probs_for_draw(params):
+            return self.calculate_probs(params, data)
+
+        all_probs = jax.vmap(probs_for_draw)(self.param_draws)
+        lb = (1.0 - ui_width) / 2.0
         ub = 1.0 - lb
-        return pd.DataFrame(
-            {
-                't1': self._to_table(t1),
-                't2': self._to_table(t2),
-                'p_mean': self._to_table(probs.mean(dim = 1)),
-                'p_lower': self._to_table(probs.quantile(q = lb, dim = 1)),
-                'p_upper': self._to_table(probs.quantile(q = ub, dim = 1)),
-            }
-        )
+        return pd.DataFrame({
+            "p_mean": np.asarray(jnp.mean(all_probs, axis = 0)),
+            "p_lower": np.asarray(
+                jnp.quantile(all_probs, lb, axis = 0, method = "linear")
+            ),
+            "p_upper": np.asarray(
+                jnp.quantile(all_probs, ub, axis = 0, method = "linear")
+            ),
+        })
