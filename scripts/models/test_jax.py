@@ -16,7 +16,7 @@ from openpois.models.jax_core import (
 NUM_DRAWS = 250
 
 
-def simulate_regression(n=2_000, p=2, n_new=4, seed=145_777):
+def simulate_regression(n = 2_000, p = 2, n_new = 4, seed = 654_321):
     key = jrd.PRNGKey(seed)
 
     def simulate_covariates(key, n):
@@ -41,9 +41,9 @@ def simulate_regression(n=2_000, p=2, n_new=4, seed=145_777):
         'N': n,
         'P': p,
         'N_new': n_new,
-        'x': x,         # jnp.ndarray
-        'y': y,         # jnp.ndarray
-        'x_new': x_new, # jnp.ndarray
+        'x': x,
+        'y': y,
+        'x_new': x_new
     }
     return parameters, data
 
@@ -87,6 +87,17 @@ if __name__ == "__main__":
     predict_with_data = partial(predict, data = data, add_sigma = True)
     predictive_draws = generate_predictive_draws(
         posterior_predictive = predict_with_data,
+        param_draws = param_draws,
+        num_draws = NUM_DRAWS,
+        key = key
+    )
+    # Predict to new data
+    data_mod = data.copy()
+    data_mod['x'] = data_mod['x_new']
+    data_mod['N'] = data_mod['x'].shape[0]
+    predict_with_new_data = partial(predict, data = data_mod, add_sigma = True)
+    predictive_draws_new = generate_predictive_draws(
+        posterior_predictive = predict_with_new_data,
         param_draws = param_draws,
         num_draws = NUM_DRAWS,
         key = key
