@@ -114,6 +114,7 @@ class ModelFitter:
         reduction_dtype: jnp.dtype | None = None,
         derive_draws: callable | None = None,
         log_likelihood_fun: callable | None = None,
+        log_1md_fun: callable | None = None,
     ):
         """
         Args:
@@ -153,6 +154,10 @@ class ModelFitter:
                 that replaces the default dense per-observation likelihood.
                 Used by models that expose a sufficient-statistics path
                 (e.g. ``RandomByTypeModel`` with ``use_sufficient_stats=True``).
+            log_1md_fun: Optional ``(params, data) -> log(1-δ)_per_row`` callable
+                used by fresh-mode predictions when δ varies across observations
+                (e.g. per-group in ``RandomByTypeModel``). If omitted, fresh mode
+                falls back to a scalar ``params["logit_delta"]``.
         """
         if num_warmup is None:
             num_warmup = num_draws if num_draws is not None else 1_000
@@ -169,6 +174,7 @@ class ModelFitter:
         self.rng_key = rng_key if rng_key is not None else jax_rng()
         self.verbose = verbose
         self.derive_draws = derive_draws
+        self.log_1md_fun = log_1md_fun
         self.param_draws = None
         self.raw_param_draws = None
         self.chain_draws = None
@@ -189,12 +195,38 @@ class ModelFitter:
         self,
         params: dict[str, jnp.ndarray],
         data: dict[str, jnp.ndarray],
+        mode: str = "conditional",
     ) -> jnp.ndarray:
         """
         Map parameters + data to change probabilities in (EPSILON, 1 - EPSILON).
+
+        Two regimes — see methodology §1.7 and §4.2 Step G:
+
+        * ``"conditional"`` (default): P(change in next Δ | y_first = 0), i.e.
+            ``1 − exp(−λ·Δ)``. δ drops out because conditioning on y_first=0
+            assigns zero posterior to the δ-component. This is the right
+            formula for rating an already-observed POI going forward.
+        * ``"fresh"``: P(change by time Δ for a *fresh* individual),
+            ``1 − (1−δ)·exp(−λ·Δ)``. Uses δ via
+            ``log_sigmoid(-logit_delta)``. Requires ``"logit_delta"`` in
+            ``params``; if absent, falls back to the conditional formula.
         """
+        if mode not in ("conditional", "fresh"):
+            raise ValueError(
+                f"mode={mode!r} must be 'conditional' or 'fresh'"
+            )
         change_rates = self.event_rate_fun(params, data)
-        probs = 1.0 - jnp.exp(-change_rates)
+        if mode == "fresh":
+            if self.log_1md_fun is not None:
+                log_1md = self.log_1md_fun(params, data)
+                probs = 1.0 - jnp.exp(log_1md - change_rates)
+            elif "logit_delta" in params:
+                log_1md = jax.nn.log_sigmoid(-params["logit_delta"])
+                probs = 1.0 - jnp.exp(log_1md - change_rates)
+            else:
+                probs = 1.0 - jnp.exp(-change_rates)
+        else:
+            probs = 1.0 - jnp.exp(-change_rates)
         return jnp.clip(probs, self.EPSILON, 1.0 - self.EPSILON)
 
     def calculate_lp(self, params: dict[str, jnp.ndarray]) -> jnp.ndarray:
@@ -335,6 +367,7 @@ class ModelFitter:
         self,
         data: dict[str, jnp.ndarray] | None = None,
         ui_width: float = 0.95,
+        mode: str = "conditional",
     ) -> pd.DataFrame:
         """
         Posterior-predictive change probabilities.
@@ -346,6 +379,9 @@ class ModelFitter:
             data: Dict of arrays with the same keys as ``self.data``. Defaults
                 to ``self.data``.
             ui_width: Width of the uncertainty interval, in (0, 1).
+            mode: ``"conditional"`` (default) or ``"fresh"`` — see
+                ``calculate_probs``. The conditional formula is δ-independent
+                and is the right default for rating already-observed POIs.
 
         Returns:
             DataFrame with one row per observation and columns
@@ -359,7 +395,7 @@ class ModelFitter:
             data = self.data
 
         def probs_for_draw(params):
-            return self.calculate_probs(params, data)
+            return self.calculate_probs(params, data, mode = mode)
 
         all_probs = jax.vmap(probs_for_draw)(self.param_draws)
         lb = (1.0 - ui_width) / 2.0

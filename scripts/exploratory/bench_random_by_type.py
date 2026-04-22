@@ -24,7 +24,7 @@ Size presets:
     small  — n = 10 000, K = 20
     medium — n = 1 000 000, K = 91
     large  — n = 4 200 000, K = 91  (slow; ~matches production scale)
-    real   — reads real osm_observations.csv via config.yaml
+    real   — reads real osm_observations.parquet via config.yaml
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def _load_real_observations() -> pd.DataFrame:
     group_key = cfg.get(
         "osm_turnover_model", "group_key", fail_if_none = False
     )
-    df = pd.read_csv(path)
+    df = pd.read_parquet(path)
     prepared = prepare_data_for_model(
         data = df,
         group_key = group_key,
@@ -199,6 +199,7 @@ def _run_one(
         param_likelihood = model.param_likelihood,
         derive_draws = model.derive_draws,
         log_likelihood_fun = model.log_likelihood_fun,
+        log_1md_fun = getattr(model, "log_1md_fun", None),
         verbose = False,
     )
 

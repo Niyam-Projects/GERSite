@@ -111,3 +111,21 @@ if __name__ == "__main__":
         chunk_size = CHUNK_SIZE,
         verbose = VERBOSE,
     )
+
+    # -------------------------------------------------------------------------
+    # Clean up intermediates
+    # -------------------------------------------------------------------------
+    finals_ok = all(
+        p.exists() and p.stat().st_size > 0
+        for p in (OUTPUT_VERSIONS, OUTPUT_CHANGES)
+    )
+    if finals_ok:
+        intermediates = (
+            RAW_PBF, FILTERED_PBF, TIME_FILTERED_PBF,
+            RAW_PR_PBF, FILTERED_PR_PBF, TIME_FILTERED_PR_PBF,
+            US_VERSIONS, US_CHANGES, PR_VERSIONS, PR_CHANGES,
+        )
+        for p in intermediates:
+            if p.exists():
+                print(f"Removing intermediate {p} ...")
+                p.unlink()

@@ -21,7 +21,7 @@ End-to-end: Geofabrik full-history PBFs → observations table → fitted λ →
    ```
    Runs `osmium tags-filter --omit-referenced` then `osmium time-filter`, then pyosmium streams results. Controlled by `download.osm.*` in config.yaml.
 
-2. **Format tabular observations** → `osm_observations.csv`
+2. **Format tabular observations** → `osm_observations.parquet`
    ```bash
    python scripts/osm_data/format_tabular.py
    ```

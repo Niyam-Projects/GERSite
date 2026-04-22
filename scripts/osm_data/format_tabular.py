@@ -32,7 +32,7 @@ Prerequisites:
     osm_changes.parquet.
 
 Output file (in osm_data directory):
-    osm_observations.csv — one row per (POI version, shared_label). Columns:
+    osm_observations.parquet — one row per (POI version, shared_label). Columns:
         id, version, tag_key, last_tag_timestamp, obs_timestamp, changed,
         shared_label, plus every filter_keys column for reference.
 """
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     print(f"DuckDB wrote {n_written:,} raw observations to {OUT_PATH}")
 
     print("Loading raw observations for shared-label assignment ...")
-    obs_df = pd.read_csv(OUT_PATH, dtype = {k: str for k in OSM_KEYS})
+    obs_df = pd.read_parquet(OUT_PATH)
 
     print("Assigning shared taxonomy labels (multi-label, exploded) ...")
     labels_per_row, _ = assign_osm_shared_label(
@@ -109,5 +109,5 @@ if __name__ == "__main__":
     print("Top shared labels by row count:")
     print(obs_df["shared_label"].value_counts().head(15).to_string())
 
-    obs_df.to_csv(OUT_PATH, index = False)
+    obs_df.to_parquet(OUT_PATH, index = False)
     print(f"Saved {len(obs_df):,} observations to {OUT_PATH}")

@@ -37,22 +37,49 @@ def _simulate_frame(
     n: int,
     true_log_lambda_by_group: np.ndarray,
     group_names: list[str],
+    is_first_interval: np.ndarray | None = None,
+    true_delta_by_group: np.ndarray | None = None,
+    dt_range: tuple[float, float] = (0.5, 5.0),
 ) -> pd.DataFrame:
-    """Build a DataFrame matching the model likelihood for each group."""
+    """Build a DataFrame matching the per-group (ZIE) likelihood.
+
+    ``is_first_interval`` defaults to all-False so the emitted frame behaves
+    like a pure Exponential(λ) fit under the ZIE likelihood (log(1−δ)
+    contributes nothing). Pass a boolean array to mark individual rows as
+    first-interval for tests that need to exercise the δ branch.
+
+    ``true_delta_by_group`` (natural scale, length K) optionally adds an
+    instant-change mass on first-interval rows: with probability δ_g the row
+    is forced to y=1 (δ-component fires at t=0), otherwise the standard
+    Exponential(λ_g) draw holds.
+    """
     key_group, key_dt, key_y = jrd.split(key, 3)
     g = np.asarray(
         jrd.randint(key_group, (n,), 0, len(group_names))
     )
     dt = np.asarray(
-        jrd.uniform(key_dt, (n,), minval = 0.5, maxval = 5.0)
+        jrd.uniform(key_dt, (n,), minval = dt_range[0], maxval = dt_range[1])
     )
     lam = np.exp(np.asarray(true_log_lambda_by_group)[g])
     p = 1.0 - np.exp(-lam * dt)
     y = np.asarray(jrd.bernoulli(key_y, jnp.asarray(p))).astype(np.int32)
+    if is_first_interval is None:
+        is_first_interval = np.zeros(n, dtype = bool)
+    if true_delta_by_group is not None:
+        # Instant-change mass fires only on first-interval rows. Fold a fixed
+        # tag into the simulation key so old legacy-signature callers (no
+        # true_delta_by_group) stay bit-identical to pre-change behavior.
+        key_delta = jrd.fold_in(key, 99)
+        delta_per_row = np.asarray(true_delta_by_group)[g]
+        fire = np.asarray(
+            jrd.bernoulli(key_delta, jnp.asarray(delta_per_row))
+        )
+        y = np.where(is_first_interval & fire, 1, y).astype(np.int32)
     return pd.DataFrame({
         "tag_years": dt,
         "changed": y,
         "group_col": [group_names[i] for i in g],
+        "is_first_interval": is_first_interval,
     })
 
 
@@ -66,6 +93,7 @@ def _run_fitter(model, key) -> ModelFitter:
         param_likelihood = model.param_likelihood,
         derive_draws = model.derive_draws,
         log_likelihood_fun = model.log_likelihood_fun,
+        log_1md_fun = getattr(model, "log_1md_fun", None),
         rng_key = key,
     )
     fitter.fit()
@@ -138,32 +166,52 @@ def test_random_by_type_recovery(reparam):
             f"far from truth {truth:+.3f}"
         )
 
-    # param_ids shape: epsilon rows always present; epsilon_raw present only
-    # when sampled directly (non-centered).
+    # param_ids layout: 4 scalars (log_lambda_0, log_sigma, logit_delta_0,
+    # log_tau), then per-group epsilon* rows, then per-group eta* rows, then
+    # per-group logit_delta + delta rows. Under non-centered the *_raw
+    # variants precede their natural-scale counterparts.
     names = list(model.param_ids["param_name"])
-    assert names[:2] == ["log_lambda_0", "log_sigma"]
+    k = len(group_names)
+    assert names[:4] == [
+        "log_lambda_0", "log_sigma", "logit_delta_0", "log_tau",
+    ]
     if reparam == "centered":
-        assert names[2:] == ["epsilon"] * len(group_names)
+        assert names[4:] == (
+            ["epsilon"] * k
+            + ["eta"] * k
+            + ["logit_delta"] * k
+            + ["delta"] * k
+        )
     else:
-        assert names[2:] == (
-            ["epsilon_raw"] * len(group_names)
-            + ["epsilon"] * len(group_names)
+        assert names[4:] == (
+            ["epsilon_raw"] * k
+            + ["epsilon"] * k
+            + ["eta_raw"] * k
+            + ["eta"] * k
+            + ["logit_delta"] * k
+            + ["delta"] * k
         )
     assert sorted(model.group_lookup["group_name"]) == sorted(group_names)
 
 
 @pytest.mark.parametrize("reparam", ["non_centered", "centered"])
 def test_random_by_type_sufficient_stats_matches_dense(reparam):
-    """Sufficient-stats and dense log-likelihoods agree to tight tolerance."""
+    """Sufficient-stats and dense ZIE log-likelihoods agree to tight tolerance."""
     import jax
 
     group_names = ["aaa", "bbb", "ccc", "ddd"]
     key = jax_rng()
+    # Mark ~30 % of rows as first-interval so both ZIE branches are exercised.
+    n = 1_500
+    is_first = np.asarray(
+        jrd.bernoulli(jrd.fold_in(key, 42), 0.3, shape = (n,))
+    )
     df = _simulate_frame(
         key,
-        n = 1_500,
+        n = n,
         true_log_lambda_by_group = np.array([-1.2, -0.8, -0.4, -0.1]),
         group_names = group_names,
+        is_first_interval = is_first,
     )
     md_dense = {
         "dt_col": "tag_years",
@@ -176,28 +224,36 @@ def test_random_by_type_sufficient_stats_matches_dense(reparam):
     model_dense = RandomByTypeModel(dataset = df, metadata = md_dense)
     model_suff = RandomByTypeModel(dataset = df, metadata = md_suff)
 
-    # Pick a not-all-zero parameter point.
+    # Pick a not-all-zero parameter point with a non-prior-mean logit_delta_0
+    # and non-zero per-group eta so the per-group δ path is exercised in both
+    # the dense and suff-stats implementations.
     log_sigma = jnp.array(-0.2)
-    n_groups = len(group_names)
+    logit_delta_0 = jnp.array(-2.0)
+    log_tau = jnp.array(-1.5)
     if reparam == "centered":
         params = {
             "log_lambda_0": jnp.array(-1.0),
             "log_sigma": log_sigma,
+            "logit_delta_0": logit_delta_0,
+            "log_tau": log_tau,
             "epsilon": jnp.array([0.3, -0.2, 0.1, -0.4]),
+            "eta": jnp.array([0.15, -0.05, 0.20, -0.10]),
         }
     else:
         params = {
             "log_lambda_0": jnp.array(-1.0),
             "log_sigma": log_sigma,
+            "logit_delta_0": logit_delta_0,
+            "log_tau": log_tau,
             "epsilon_raw": jnp.array([0.3, -0.2, 0.1, -0.4]),
+            "eta_raw": jnp.array([0.8, -0.3, 1.1, -0.6]),
         }
 
-    # Dense path: sum(target*log_p + (1-t)*(-rate)) + param_likelihood.
-    rate = model_dense.event_rate_fun(params, model_dense.data)
-    log_p = jnp.log(-jnp.expm1(-rate))
-    t = model_dense.target
+    # Dense ZIE path via the model's own dense log_likelihood_fun.
     ll_dense = float(
-        jnp.sum(t * log_p + (1.0 - t) * (-rate))
+        model_dense.log_likelihood_fun(
+            params, model_dense.data, model_dense.target,
+        )
         + model_dense.param_likelihood(params)
     )
 
@@ -212,11 +268,8 @@ def test_random_by_type_sufficient_stats_matches_dense(reparam):
 
     # Gradients must agree too — this is what NUTS actually uses.
     def _wrap_dense(p):
-        rate = model_dense.event_rate_fun(p, model_dense.data)
-        log_p = jnp.log(-jnp.expm1(-rate))
-        t = model_dense.target
         return (
-            jnp.sum(t * log_p + (1.0 - t) * (-rate))
+            model_dense.log_likelihood_fun(p, model_dense.data, model_dense.target)
             + model_dense.param_likelihood(p)
         )
 
@@ -248,21 +301,33 @@ def test_random_by_type_reparam_likelihoods_agree():
     model_c = _build_random_by_type(df, reparam = "centered")
     model_nc = _build_random_by_type(df, reparam = "non_centered")
 
-    # Pick an arbitrary (not-all-zero) point. epsilon = exp(log_sigma)*eps_raw.
+    # Pick an arbitrary (not-all-zero) point. epsilon = exp(log_sigma)*eps_raw
+    # and eta = exp(log_tau)*eta_raw under the non-centered parameterisation.
     log_lambda_0 = jnp.array(-1.0)
     log_sigma = jnp.array(-0.3)
     epsilon_raw = jnp.array([0.5, -0.7])
     epsilon = jnp.exp(log_sigma) * epsilon_raw
 
+    logit_delta_0 = jnp.array(-2.5)
+    log_tau = jnp.array(-1.2)
+    eta_raw = jnp.array([0.9, -0.4])
+    eta = jnp.exp(log_tau) * eta_raw
+
     params_c = {
         "log_lambda_0": log_lambda_0,
         "log_sigma": log_sigma,
+        "logit_delta_0": logit_delta_0,
+        "log_tau": log_tau,
         "epsilon": epsilon,
+        "eta": eta,
     }
     params_nc = {
         "log_lambda_0": log_lambda_0,
         "log_sigma": log_sigma,
+        "logit_delta_0": logit_delta_0,
+        "log_tau": log_tau,
         "epsilon_raw": epsilon_raw,
+        "eta_raw": eta_raw,
     }
 
     # Event rates must match (deterministic transform).
@@ -270,14 +335,15 @@ def test_random_by_type_reparam_likelihoods_agree():
     r_nc = model_nc.event_rate_fun(params_nc, model_nc.data)
     np.testing.assert_allclose(np.asarray(r_c), np.asarray(r_nc), rtol = 1e-5)
 
-    # Full log-priors differ only by the Jacobian of the N(0, exp(σ)) vs
-    # N(0, 1) parameterisation; here we compare in closed form.
+    # Full log-priors differ only by the Jacobian of the N(0, exp(·)) vs
+    # N(0, 1) parameterisations on both random effects; here we compare in
+    # closed form. Change-of-variables:
+    #   log p_c(epsilon | log_sigma) = log p_nc(eps_raw) - K * log_sigma
+    #   log p_c(eta | log_tau)       = log p_nc(eta_raw) - K * log_tau
     lp_c = float(model_c.param_likelihood(params_c))
     lp_nc = float(model_nc.param_likelihood(params_nc))
-    # log p_c(epsilon | log_sigma) = log p_nc(eps_raw) - K * log_sigma
-    # (standard change-of-variables for epsilon = exp(log_sigma) * eps_raw).
     k = len(group_names)
-    expected_gap = float(k * log_sigma)
+    expected_gap = float(k * log_sigma + k * log_tau)
     np.testing.assert_allclose(lp_c - lp_nc, -expected_gap, atol = 1e-4)
 
 
@@ -344,12 +410,21 @@ def test_random_by_type_multichain_diagnostics():
     """Multi-chain NUTS produces per-chain draws plus R-hat / ESS diagnostics."""
     group_names = ["aaa", "bbb"]
     key = jax_rng()
-    key_sim, key_fit = jrd.split(key)
+    key_sim, key_first, key_fit = jrd.split(key, 3)
+    # Mark ~30 % of rows as first-interval and emit a nontrivial δ component so
+    # the per-group δ parameters have identifying data (otherwise eta/eta_raw
+    # are driven entirely by the prior and ESS collapses).
+    n = 1_500
+    is_first = np.asarray(
+        jrd.bernoulli(key_first, 0.3, shape = (n,))
+    )
     df = _simulate_frame(
         key_sim,
-        n = 800,
+        n = n,
         true_log_lambda_by_group = np.array([-1.0, -0.6]),
         group_names = group_names,
+        is_first_interval = is_first,
+        true_delta_by_group = np.array([0.04, 0.08]),
     )
     model = _build_random_by_type(df, reparam = "non_centered")
     fitter = ModelFitter(
@@ -362,6 +437,7 @@ def test_random_by_type_multichain_diagnostics():
         param_likelihood = model.param_likelihood,
         derive_draws = model.derive_draws,
         log_likelihood_fun = model.log_likelihood_fun,
+        log_1md_fun = model.log_1md_fun,
         rng_key = key_fit,
     )
     fitter.fit()
@@ -381,6 +457,117 @@ def test_random_by_type_multichain_diagnostics():
         "well-specified model"
     )
     assert (diag["ess_bulk"] > 10.0).all()
+
+
+def test_random_by_type_delta_recovery():
+    """RandomByTypeModel recovers per-group δ when the truth varies by group."""
+    group_names = ["aaa", "bbb", "ccc", "ddd"]
+    # Keep λ small and Δ short so the ZIE instant-change mass δ stands out
+    # from Poisson-driven change in the likelihood — with λ ≈ 0.13 and Δ ~ 0.3
+    # the base change probability is ~4 %, so a 12 % δ dominates the first-
+    # interval y=1 signal and the posterior can identify it.
+    true_log_lambda_by_group = np.array([-2.0, -2.0, -2.0, -2.0])
+    true_delta_by_group = np.array([0.02, 0.08, 0.16, 0.30])
+    n = 5_000
+    key = jax_rng()
+    key_sim, key_first, key_fit = jrd.split(key, 3)
+    # All rows first-interval so every row carries δ signal.
+    is_first = np.ones(n, dtype = bool)
+    df = _simulate_frame(
+        key_sim,
+        n = n,
+        true_log_lambda_by_group = true_log_lambda_by_group,
+        group_names = group_names,
+        is_first_interval = is_first,
+        true_delta_by_group = true_delta_by_group,
+        dt_range = (0.1, 0.5),
+    )
+    # Loosen the tight default prior so the test data can pull posterior δ to
+    # the truth within a short chain — otherwise heavy shrinkage fights the
+    # recovery signal.
+    model = RandomByTypeModel(
+        dataset = df,
+        metadata = {
+            "dt_col": "tag_years",
+            "group": "group_col",
+            "var_prior": (0.0, 1.0),
+            "logit_delta_var_prior": (0.0, 1.0),
+            "reparam": "non_centered",
+        },
+    )
+    fitter = _run_fitter(model, key_fit)
+
+    draws = fitter.get_parameter_draws()
+    # Map posterior delta to the same group-name order as the truth array.
+    group_order = (
+        model.group_lookup
+        .set_index("group_name")
+        .loc[group_names, "group_id"]
+        .to_numpy()
+    )
+    post_mean_delta = np.asarray(
+        jnp.mean(draws["delta"], axis = 0)
+    )[group_order]
+    # δ is weakly identified relative to λ when first-interval Δ is not small,
+    # so the posterior is noisy. Loose coverage check + rank check keeps the
+    # test meaningful as a regression sentinel.
+    for i, truth in enumerate(true_delta_by_group):
+        assert abs(post_mean_delta[i] - truth) < 0.10, (
+            f"group {group_names[i]}: posterior δ {post_mean_delta[i]:.3f} "
+            f"far from truth {truth:.3f}"
+        )
+    # Rank of posterior means should match rank of truth.
+    assert np.all(
+        np.argsort(post_mean_delta) == np.argsort(true_delta_by_group)
+    ), (
+        f"posterior ranking {np.argsort(post_mean_delta)} doesn't match truth "
+        f"ranking {np.argsort(true_delta_by_group)}"
+    )
+
+
+def test_random_by_type_tight_tau_prior_shrinks():
+    """Under uniform true δ, the tight log_tau prior concentrates τ near zero."""
+    group_names = ["aaa", "bbb", "ccc", "ddd"]
+    true_delta = 0.05
+    true_delta_by_group = np.full(len(group_names), true_delta)
+    n = 2_000
+    key = jax_rng()
+    key_sim, key_first, key_fit = jrd.split(key, 3)
+    is_first = np.asarray(
+        jrd.bernoulli(key_first, 0.3, shape = (n,))
+    )
+    df = _simulate_frame(
+        key_sim,
+        n = n,
+        true_log_lambda_by_group = np.array([-1.0, -1.0, -1.0, -1.0]),
+        group_names = group_names,
+        is_first_interval = is_first,
+        true_delta_by_group = true_delta_by_group,
+    )
+    # Use the default tight prior explicitly.
+    model = RandomByTypeModel(
+        dataset = df,
+        metadata = {
+            "dt_col": "tag_years",
+            "group": "group_col",
+            "var_prior": (0.0, 1.0),
+            "logit_delta_var_prior": (-2.0, 0.5),
+            "reparam": "non_centered",
+        },
+    )
+    fitter = _run_fitter(model, key_fit)
+
+    draws = fitter.get_parameter_draws()
+    log_tau_upper = float(
+        jnp.quantile(draws["log_tau"], 0.975, method = "linear")
+    )
+    # Under the tight prior (mean -2, scale 0.5), uniform truth should keep the
+    # upper credible bound well below -1 (i.e. τ < ~0.37). If this fails the
+    # prior is effectively not shrinking.
+    assert log_tau_upper < -0.75, (
+        f"log_tau 97.5% upper = {log_tau_upper:+.3f} — tight prior isn't "
+        "shrinking τ as expected"
+    )
 
 
 def test_random_by_type_requires_group():

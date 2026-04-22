@@ -1,7 +1,7 @@
 """
 Fit an empirical Bayes JAX model for OSM POI tag change rates.
 
-Reads ``osm_observations.csv`` (produced by ``osm_data/format_tabular.py``,
+Reads ``osm_observations.parquet`` (produced by ``osm_data/format_tabular.py``,
 one row per (POI version, shared_label)) and fits a Poisson change-rate
 model using BlackJAX NUTS. The model estimates a per-group change rate λ
 (events per year). Predictions give the probability that a tag changes
@@ -24,6 +24,10 @@ Config keys used (config.yaml):
     osm_turnover_model.default_model_type   — "constant" or "random_by_type"
                                               (overridable via --model-type)
     osm_turnover_model.var_prior            — (loc, scale) hyperprior on log_sigma
+    osm_turnover_model.logit_delta_prior    — (loc, scale) prior on logit_delta_0
+                                              intercept
+    osm_turnover_model.logit_delta_var_prior — (loc, scale) tight hyperprior on
+                                              log_tau (per-group δ scale)
     osm_turnover_model.n_warmup             — NUTS warmup steps (adaptation)
     osm_turnover_model.n_samples            — posterior draws retained
     osm_turnover_model.n_chains             — number of NUTS chains (vmapped)
@@ -120,13 +124,15 @@ if __name__ == "__main__":
     config.write_self("model_output")
 
     # Data preparation ------------------------------------------------------>
-    observations_df = pd.read_csv(OBSERVATIONS_PATH)
+    observations_df = pd.read_parquet(OBSERVATIONS_PATH)
+    # t1_col defaults to "last_obs_timestamp" in prepare_data_for_model, so
+    # tag_years is the inter-observation interval the per-row Bernoulli-on-
+    # Poisson likelihood requires (methodology §1.2).
     obs_sub = prepare_data_for_model(
         data = observations_df,
         group_key = GROUP_KEY,
         group_values = GROUP_VALUES,
         min_value_count = MIN_VALUE_COUNT,
-        t1_col = "last_tag_timestamp",
         t2_col = "obs_timestamp",
     )
 
@@ -135,15 +141,26 @@ if __name__ == "__main__":
         "osm_turnover_model", "default_model_type"
     )
     print(f"Model type: {model_type}")
+    metadata = {
+        "dt_col": "tag_years",
+        "group": GROUP_KEY,
+        "var_prior": tuple(
+            config.get("osm_turnover_model", "var_prior")
+        ),
+    }
+    logit_delta_prior = config.get(
+        "osm_turnover_model", "logit_delta_prior", fail_if_none = False
+    )
+    if logit_delta_prior is not None:
+        metadata["logit_delta_prior"] = tuple(logit_delta_prior)
+    logit_delta_var_prior = config.get(
+        "osm_turnover_model", "logit_delta_var_prior", fail_if_none = False
+    )
+    if logit_delta_var_prior is not None:
+        metadata["logit_delta_var_prior"] = tuple(logit_delta_var_prior)
     model = get_model_class(model_type)(
         dataset = obs_sub,
-        metadata = {
-            "dt_col": "tag_years",
-            "group": GROUP_KEY,
-            "var_prior": tuple(
-                config.get("osm_turnover_model", "var_prior")
-            ),
-        },
+        metadata = metadata,
     )
 
     fitter = ModelFitter(
@@ -157,6 +174,7 @@ if __name__ == "__main__":
         param_likelihood = model.param_likelihood,
         derive_draws = model.derive_draws,
         log_likelihood_fun = model.log_likelihood_fun,
+        log_1md_fun = getattr(model, "log_1md_fun", None),
         verbose = True,
     )
     fitter.fit()
@@ -172,10 +190,23 @@ if __name__ == "__main__":
         )
 
     # Predictions ----------------------------------------------------------->
+    # Emit both regimes (methodology §4.2 Step G): the conditional formula
+    # populates p_mean/p_lower/p_upper (δ-independent, right for rating
+    # already-observed POIs); the fresh formula populates p_fresh_* (uses δ,
+    # right for rating a hypothetical freshly tagged POI).
     predict_times = jnp.arange(101) / 10.0
     predict_data = model.build_predict_data(predict_times)
+    conditional = fitter.predict(data = predict_data, mode = "conditional")
+    fresh = (
+        fitter.predict(data = predict_data, mode = "fresh")
+        .rename(columns = {
+            "p_mean": "p_fresh_mean",
+            "p_lower": "p_fresh_lower",
+            "p_upper": "p_fresh_upper",
+        })
+    )
     predictions = (
-        fitter.predict(data = predict_data)
+        pd.concat([conditional, fresh], axis = 1)
         .assign(t1 = 0.0, units = "years")
     )
     predictions["t2"] = np.asarray(predict_data["dt"])

@@ -30,6 +30,8 @@ Output file:
         Columns: overture_id, overture_name, taxonomy_l0, taxonomy_l1,
         taxonomy_l2, brand_name, confidence, geometry, source
 """
+import shutil
+
 import pyarrow.parquet as pq
 from config_versioned import Config
 from openpois.io.boundary import get_us_pr_boundary
@@ -91,3 +93,12 @@ if __name__ == "__main__":
     )
     n_rows = pq.read_metadata(output_path).num_rows
     print(f"Saved {n_rows:,} Overture POIs to {output_path}")
+
+    # -------------------------------------------------------------------------
+    # Clean up intermediates
+    # -------------------------------------------------------------------------
+    if OUTPUT_PATH.exists() and OUTPUT_PATH.stat().st_size > 0:
+        parts_dir = SAVE_DIR / ".parts"
+        if parts_dir.is_dir():
+            print(f"Removing intermediate {parts_dir} ...")
+            shutil.rmtree(parts_dir)

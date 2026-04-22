@@ -1,7 +1,7 @@
 """
 Plot OSM tag stability curves from observation data.
 
-Reads ``osm_observations.csv`` (one row per (POI version, shared_label)) and
+Reads ``osm_observations.parquet`` (one row per (POI version, shared_label)) and
 computes Kaplan-Meier-style survival estimates showing what fraction of
 observations remain unchanged over time. Saves two types of PNG figures:
 
@@ -12,7 +12,7 @@ observations remain unchanged over time. Saves two types of PNG figures:
        count, shown as separate facets.
 
 Config keys used (config.yaml):
-    directories.osm_data           — directory containing input CSV and viz/ output
+    directories.osm_data           — directory containing input parquet and viz/ output
     osm_data.tag_key               — tag key whose changes define observation
                                      events (used only in plot titles)
     osm_data.timestamp_cols        — columns to parse as timestamps (rows with nulls dropped)
@@ -112,9 +112,9 @@ def get_preds_dict(model_stub: str | None) -> dict[str, pd.DataFrame]:
             return None
         return pd.read_csv(preds_fp).assign(
             year = pd.col('t2'),
-            conf_mean = (1.0 - pd.col('p_mean')),
-            conf_lower = (1.0 - pd.col('p_upper')),
-            conf_upper = (1.0 - pd.col('p_lower')),
+            conf_mean = (1.0 - pd.col('p_fresh_mean')),
+            conf_lower = (1.0 - pd.col('p_fresh_upper')),
+            conf_upper = (1.0 - pd.col('p_fresh_lower')),
         )
 
     return {
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     #   observation timestamp will be missing for these rows
     timestamp_cols = config.get("osm_data", "timestamp_cols")
     observations_df = (
-        pd.read_csv(OBSERVATIONS_PATH)
+        pd.read_parquet(OBSERVATIONS_PATH)
         .dropna(subset = timestamp_cols)
     )
     for timestamp_col in timestamp_cols:
