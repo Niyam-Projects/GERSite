@@ -126,7 +126,7 @@ osm_data:
     - last_obs_timestamp
     - last_tag_timestamp
   apply_model:
-    model_stub: '20260416'
+    model_stub: '20260421'
 
 # Settings for scripts/models/osm_turnover.py (JAX turnover model)
 osm_turnover_model:
@@ -180,7 +180,6 @@ directories:
       predictions: predictions.csv
       diagnostics: diagnostics.csv
       inference_data: inference_data.nc
-      fitted_model: fitted_model.pkl
   snapshot_foursquare:
     versioned: true
     path: ~/data/openpois/snapshots/foursquare

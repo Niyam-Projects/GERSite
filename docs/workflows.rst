@@ -107,7 +107,7 @@ See :mod:`openpois.osm.format_observations`.
 Fits an empirical Bayes JAX model (constant or random-effects by type)
 estimating the Poisson change rate λ per group via BlackJAX NUTS. Outputs
 ``fitted_params.csv`` and ``predictions.csv`` (and optionally
-``param_draws.csv`` / ``fitted_model.pkl``).
+``param_draws.csv``).
 
 See :mod:`openpois.models.model_fitter`, :mod:`openpois.models.osm_models`,
 and :mod:`openpois.models.setup`.

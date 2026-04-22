@@ -31,7 +31,7 @@ End-to-end: Geofabrik full-history PBFs → observations table → fitted λ →
    ```bash
    python scripts/models/osm_turnover.py
    ```
-   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv`, `fitted_model.pkl` to `{date}_by_shared_label` (the unified random-effects model) or `{date}_constant` (single-rate baseline) under `directories.model_output.path`.
+   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv` to `{date}_by_shared_label` (the unified random-effects model) or `{date}_constant` (single-rate baseline) under `directories.model_output.path`.
 
 4. **Apply predictions to the OSM snapshot** → `osm_snapshot_rated.parquet`
    ```bash

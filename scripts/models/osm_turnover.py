@@ -38,11 +38,9 @@ Output files (in ``model_output`` directory):
     diagnostics.csv     — per-parameter R-hat / bulk-ESS (multi-chain only)
     inference_data.nc   — ArviZ InferenceData (optional, if arviz installed)
     param_draws.csv     — posterior draws (if save_full_model = true)
-    fitted_model.pkl    — pickled ModelFitter (if save_full_model = true)
 """
 
 import argparse
-import pickle
 
 import jax.numpy as jnp
 import numpy as np
@@ -211,7 +209,3 @@ if __name__ == "__main__":
             "model_output",
             "param_draws",
         )
-        with open(
-            config.get_file_path("model_output", "fitted_model"), "wb",
-        ) as fh:
-            pickle.dump(fitter, fh)

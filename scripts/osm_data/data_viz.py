@@ -27,9 +27,11 @@ Output files (in osm_data/viz/):
     osm_changes_all.png                     — overall survival curve
     osm_changes_all_preds.png               — overall curve with constant-model
                                               prediction overlay
-    osm_changes_by_shared_label.png         — per-label facet grid
-    osm_changes_shared_label_preds_<label>.png — per-label curves with
-                                                 shared-label model predictions
+    osm_changes_by_shared_label.png         — per-label facet grid (top N)
+    by_type/osm_changes_<label>.png         — per-label curves with
+                                              shared-label model predictions,
+                                              one file per shared_label with a
+                                              fitted prediction
 """
 
 import numpy as np
@@ -68,20 +70,29 @@ VIZ_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def fig_save(
-    fig: gg.ggplot, stub: str, width: float = 10, height: float = 6, **kwargs
+    fig: gg.ggplot,
+    stub: str,
+    width: float = 10,
+    height: float = 6,
+    subdir: str | None = None,
+    **kwargs,
 ) -> None:
     """
-    Save a ggplot figure as a PNG file to VIZ_DIR.
+    Save a ggplot figure as a PNG file to VIZ_DIR (or a subdirectory of it).
 
     Args:
         fig: The ggplot figure to save.
         stub: Output filename stem (without extension).
         width: Figure width in inches.
         height: Figure height in inches.
+        subdir: Optional subdirectory under VIZ_DIR. Created if it doesn't
+            exist.
         **kwargs: Additional keyword arguments forwarded to fig.save().
     """
+    out_dir = VIZ_DIR if subdir is None else VIZ_DIR / subdir
+    out_dir.mkdir(parents = True, exist_ok = True)
     fig.save(
-        filename = VIZ_DIR / f"{stub}.png",
+        filename = out_dir / f"{stub}.png",
         width = width,
         height = height,
         units = 'in',
@@ -209,12 +220,9 @@ if __name__ == "__main__":
     fig_save(fig = fig, stub = "osm_changes_by_shared_label")
 
     if preds.get('shared_label') is not None:
-        top_n_labels = (
-            to_plot_df["shared_label"].value_counts().head(TOP_N_TYPES).index
-        )
-        pred_groups = preds['shared_label']['group_name'].unique().tolist()
-        keep_preds = list(set(top_n_labels) & set(pred_groups))
-        for pred_label in keep_preds:
+        observed_labels = set(to_plot_df["shared_label"].dropna().unique())
+        pred_groups = set(preds['shared_label']['group_name'].unique())
+        for pred_label in sorted(pred_groups & observed_labels):
             print(f"Plotting shared_label = {pred_label}")
             fig = change_plot_create(
                 observations = to_plot_df.query(
@@ -235,5 +243,6 @@ if __name__ == "__main__":
             )
             fig_save(
                 fig,
-                stub = f"osm_changes_shared_label_preds_{pred_label}",
+                stub = f"osm_changes_{pred_label}",
+                subdir = "by_type",
             )

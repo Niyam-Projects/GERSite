@@ -49,6 +49,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 - [docs/data-sources.md](docs/data-sources.md) — URLs, auth, schema quirks for every source
 - [docs/taxonomy-setup.md](docs/taxonomy-setup.md) — crosswalk CSVs, build_taxonomy.py, frontend sync
 - [docs/data-versioning.md](docs/data-versioning.md) — `versions:` block, path resolution, external references
+- [docs/turnover-model-methodology.md](docs/turnover-model-methodology.md) — statistical derivation of the POI turnover model with ZIE extension
 
 ## Running to-do
 
