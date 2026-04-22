@@ -23,7 +23,6 @@
     :osm-filters="osmFilters"
     :overture-filters="overtureFilters"
     :conflated-filters="conflatedFilters"
-    @zoom-changed="currentZoom = $event"
   />
   <AmenityFilter
     :active-source="activeSource"
@@ -50,7 +49,6 @@ import {
 } from './constants.js'
 
 const activeSource = ref('osm')
-const currentZoom = ref(4)
 const mapRef = ref(null)
 
 const osmFilters = ref(

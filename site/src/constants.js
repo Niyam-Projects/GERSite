@@ -7,8 +7,7 @@ import {
   OVERTURE_L0S,
 } from './taxonomy.generated.js'
 
-// S3 URLs — PMTiles are the primary per-dataset archives. The site reads
-// them via ol-pmtiles; no DuckDB-WASM query path anymore.
+// S3 URLs — PMTiles archives read via ol-pmtiles.
 export const OSM_PMTILES_URL =
   'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260417/osm_snapshot.pmtiles'
 

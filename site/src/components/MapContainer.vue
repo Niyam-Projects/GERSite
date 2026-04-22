@@ -91,8 +91,6 @@ const props = defineProps({
   conflatedFilters: { type: Object, required: true },
 })
 
-const emit = defineEmits(['zoom-changed'])
-
 const mapEl = ref(null)
 const popupEl = ref(null)
 const map = shallowRef(null)
@@ -100,7 +98,6 @@ const popupOverlay = shallowRef(null)
 const selectedFeature = shallowRef(null)
 const selectedStyle = ref('positron')
 const basemapModalOpen = ref(false)
-const currentZoom = ref(INITIAL_ZOOM)
 const baseMapStyles = BASE_MAP_STYLES
 
 const { locate } = useGeolocation()
@@ -150,12 +147,6 @@ onMounted(async () => {
   popupEl.value.addEventListener('pointerdown', (e) => e.stopPropagation())
 
   olMap.on('singleclick', handleClick)
-
-  view.on('change:resolution', () => {
-    const z = view.getZoom()
-    currentZoom.value = z
-    emit('zoom-changed', z)
-  })
 
   // Initialise PMTiles filters from props
   updateOsmFilters(props.osmFilters)
