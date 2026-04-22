@@ -1,65 +1,86 @@
-import VectorSource from 'ol/source/Vector'
-import VectorLayer from 'ol/layer/Vector'
-import Cluster from 'ol/source/Cluster'
-import Feature from 'ol/Feature'
-import Point from 'ol/geom/Point'
-import { fromLonLat } from 'ol/proj'
-import { confidenceStyle } from './styleFactory.js'
-import { mergeColocated } from '../utils.js'
-import { CLUSTER_MAX_ZOOM } from '../constants.js'
+import VectorTileLayer from 'ol/layer/VectorTile'
+import { PMTilesVectorSource } from 'ol-pmtiles'
+import { Style, Circle, Fill, Stroke } from 'ol/style'
+import { confidenceColor, discretizeConf } from '../utils.js'
+import { CONFLATED_PMTILES_URL } from '../constants.js'
 
-let vectorSource = null
-let clusterSource = null
 let layer = null
+let enabledLabels = null  // null = all on; otherwise Set<string>
+
+const styleCache = {}
 
 export function getConflatedLayer() {
   if (layer) return layer
 
-  vectorSource = new VectorSource()
-  clusterSource = new Cluster({
-    distance: 40,
-    minDistance: 20,
-    source: vectorSource,
-  })
-
-  layer = new VectorLayer({
-    source: clusterSource,
-    style: confidenceStyle,
+  layer = new VectorTileLayer({
+    source: new PMTilesVectorSource({ url: CONFLATED_PMTILES_URL }),
+    style: conflatedTileStyle,
     zIndex: 10,
   })
-
   return layer
 }
 
 /**
- * Update the conflated layer with features from an Arrow query result.
+ * Update the set of enabled shared_label values and redraw the layer in place.
+ * Called from MapContainer.vue whenever the conflated filter checkboxes change.
+ *
+ * filtersObj is {shared_label: boolean}. If every value is true we leave the
+ * filter as null (fast-path, no per-feature set lookup).
  */
-export function updateConflatedFeatures(arrowFeatures) {
-  if (!vectorSource) return
-  vectorSource.clear()
+export function updateConflatedFilters(filtersObj) {
+  const entries = Object.entries(filtersObj)
+  const enabled = entries.filter(([, v]) => v).map(([k]) => k)
+  if (enabled.length === entries.length) {
+    enabledLabels = null
+  } else if (enabled.length === 0) {
+    enabledLabels = new Set()  // hide all
+  } else {
+    enabledLabels = new Set(enabled)
+  }
+  if (layer) layer.changed()
+}
 
-  const olFeatures = mergeColocated(arrowFeatures).map(f => {
-    const feature = new Feature({
-      geometry: new Point(fromLonLat([f.lon, f.lat])),
+function conflatedTileStyle(feature) {
+  if (enabledLabels !== null) {
+    const label = feature.get('shared_label')
+    if (!enabledLabels.has(label)) return null
+  }
+
+  const conf = feature.get('conf_mean')
+  const bucket = discretizeConf(conf)
+  if (!styleCache[bucket]) {
+    const color = confidenceColor(conf == null || isNaN(conf) ? null : conf)
+    styleCache[bucket] = new Style({
+      image: new Circle({
+        radius: 5,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#fff', width: 1 }),
+      }),
     })
-    for (const [k, v] of Object.entries(f.properties)) {
-      feature.set(k, v)
-    }
-    feature.set('_source', 'conflated')
-    return feature
-  })
-
-  vectorSource.addFeatures(olFeatures)
+  }
+  return styleCache[bucket]
 }
 
 /**
- * Toggle clustering based on zoom level.
+ * Wrap an immutable VectorTile RenderFeature in a plain object that exposes
+ * the OL-Feature-ish API used by PoiPopup.vue.
  */
-export function updateConflatedClusterMode(zoom) {
-  if (!clusterSource) return
-  if (zoom > CLUSTER_MAX_ZOOM) {
-    clusterSource.setDistance(0)
-  } else {
-    clusterSource.setDistance(40)
+export function wrapConflatedFeature(rf) {
+  const props = {
+    _source: 'conflated',
+    unified_id: rf.get('unified_id'),
+    source: rf.get('source'),
+    shared_label: rf.get('shared_label'),
+    name: rf.get('name'),
+    brand: rf.get('brand'),
+    conf_mean: rf.get('conf_mean'),
+    match_score: rf.get('match_score'),
+    match_distance_m: rf.get('match_distance_m'),
+    source_dataset: 'Conflated (OSM + Overture)',
+  }
+  return {
+    get: (k) => props[k],
+    getKeys: () => Object.keys(props),
+    getGeometry: () => rf.getGeometry(),
   }
 }

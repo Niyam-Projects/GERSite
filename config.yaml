@@ -217,6 +217,7 @@ directories:
       conflated: conflated.parquet
       match_diagnostics: match_diagnostics.parquet
       partitioned: conflated_partitioned
+      pmtiles: conflated.pmtiles
       summary_by_label: summary_by_label.csv
   testing:
     versioned: false
@@ -265,6 +266,35 @@ upload:
   latest_url_conflation: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260422/conflated_partitioned/"
   geohash_precision_partition: 4  # ~39 km x 20 km cells; ~1,000–3,000 cells over CONUS
   geohash_precision_sort: 6       # ~0.6 km x 1.2 km; fine-grained sort within each partition
+  # PMTiles generation — single-zoom archive at z14 for both OSM and conflated.
+  # Site's View.minZoom is 14; OpenLayers over-zooms past z14 natively so
+  # z15-20 render as lossless geometric scale-ups of the z14 tile.
   pmtiles:
     min_zoom: 14
-    max_zoom: 16
+    max_zoom: 14
+    drop_strategy: "drop-densest-as-needed"
+    osm_layer_name: "osm_pois"
+    conflated_layer_name: "conflated_pois"
+    osm_properties:
+      - osm_id
+      - source
+      - name
+      - conf_mean      # drives confidence-based point coloring
+      - amenity
+      - shop
+      - leisure
+      - healthcare
+      - craft
+      - historic
+      - landuse
+      - office
+      - tourism
+    conflated_properties:
+      - unified_id
+      - source
+      - shared_label
+      - conf_mean
+      - name
+      - brand
+      - match_score
+      - match_distance_m

@@ -2,11 +2,6 @@
   <div class="map-container">
     <div ref="mapEl" style="width: 100%; height: 100%"></div>
 
-    <div v-show="loading" class="loading-indicator">
-      <div class="spinner"></div>
-      Loading POIs...
-    </div>
-
     <button
       class="geolocation-btn"
       title="My location"
@@ -66,15 +61,11 @@ import { fromLonLat, transformExtent } from 'ol/proj'
 import { apply } from 'ol-mapbox-style'
 import PoiPopup from './PoiPopup.vue'
 import ConfidenceLegend from './ConfidenceLegend.vue'
-import { useDuckDB } from '../composables/useDuckDB.js'
 import { useGeolocation } from '../composables/useGeolocation.js'
-import { createQueryDebouncer } from '../queries/queryDebouncer.js'
-import { buildOsmQuery } from '../queries/osmQuery.js'
-import { buildConflatedQuery } from '../queries/conflatedQuery.js'
 import {
   getOsmLayer,
-  updateOsmFeatures,
-  updateClusterMode,
+  updateOsmFilters,
+  wrapOsmFeature,
 } from '../layers/osmLayer.js'
 import {
   getOvertureLayer,
@@ -83,15 +74,14 @@ import {
 } from '../layers/overtureLayer.js'
 import {
   getConflatedLayer,
-  updateConflatedFeatures,
-  updateConflatedClusterMode,
+  updateConflatedFilters,
+  wrapConflatedFeature,
 } from '../layers/conflatedLayer.js'
-import { arrowToFeatures, extentToLonLatBbox } from '../utils.js'
 import {
   BASE_MAP_STYLES,
   INITIAL_CENTER,
   INITIAL_ZOOM,
-  MIN_ZOOM_FOR_DATA,
+  MIN_ZOOM,
 } from '../constants.js'
 
 const props = defineProps({
@@ -108,15 +98,12 @@ const popupEl = ref(null)
 const map = shallowRef(null)
 const popupOverlay = shallowRef(null)
 const selectedFeature = shallowRef(null)
-const loading = ref(false)
 const selectedStyle = ref('positron')
 const basemapModalOpen = ref(false)
 const currentZoom = ref(INITIAL_ZOOM)
 const baseMapStyles = BASE_MAP_STYLES
 
-const { initDuckDB, runQuery, ready: duckReady } = useDuckDB()
 const { locate } = useGeolocation()
-const debouncer = createQueryDebouncer(300)
 
 let geoOverlay = null
 let geocodeMarker = null
@@ -130,7 +117,7 @@ onMounted(async () => {
   const view = new View({
     center: fromLonLat(INITIAL_CENTER),
     zoom: INITIAL_ZOOM,
-    minZoom: 14,
+    minZoom: MIN_ZOOM,
   })
 
   const osmLyr = getOsmLayer()
@@ -170,23 +157,15 @@ onMounted(async () => {
     emit('zoom-changed', z)
   })
 
-  olMap.on('moveend', () => {
-    const z = view.getZoom()
-    currentZoom.value = z
-    updateClusterMode(z)
-    updateConflatedClusterMode(z)
-    loadData()
-  })
-
-  // Initialise Overture PMTiles filter from props
+  // Initialise PMTiles filters from props
+  updateOsmFilters(props.osmFilters)
   updateOvertureFilters(props.overtureFilters)
+  updateConflatedFilters(props.conflatedFilters)
 
-  initDuckDB()
   handleGeolocate()
 })
 
 onBeforeUnmount(() => {
-  debouncer.cancel()
   if (map.value) map.value.setTarget(null)
 })
 
@@ -237,114 +216,30 @@ function selectBasemap(key) {
   applyBaseStyle(key)
 }
 
-// ---- Data loading ----
-
-async function loadData() {
-  if (props.activeSource !== 'osm' && props.activeSource !== 'conflated') return
-  if (currentZoom.value < MIN_ZOOM_FOR_DATA) return
-  if (!duckReady.value) return
-
-  try {
-    await debouncer.schedule(async () => {
-      loading.value = true
-      try {
-        if (props.activeSource === 'osm') {
-          await loadOsmData()
-        } else if (props.activeSource === 'conflated') {
-          await loadConflatedData()
-        }
-      } finally {
-        loading.value = false
-      }
-    })
-  } catch (err) {
-    if (err.name === 'AbortError') return
-    console.error('Query error:', err)
-    loading.value = false
-  }
-}
-
-async function loadOsmData() {
-  const extent = map.value.getView().calculateExtent()
-  const bbox = extentToLonLatBbox(extent)
-
-  const enabledKeys = Object.entries(props.osmFilters)
-    .filter(([, v]) => v)
-    .map(([k]) => k)
-
-  if (enabledKeys.length === 0) {
-    updateOsmFeatures([])
-    return
-  }
-
-  const sql = buildOsmQuery(bbox, enabledKeys)
-  if (!sql) {
-    showZoomMessage.value = true
-    return
-  }
-
-  const result = await runQuery(sql)
-  const features = arrowToFeatures(result)
-  updateOsmFeatures(features)
-}
-
-async function loadConflatedData() {
-  const extent = map.value.getView().calculateExtent()
-  const bbox = extentToLonLatBbox(extent)
-
-  const enabledLabels = Object.entries(props.conflatedFilters)
-    .filter(([, v]) => v)
-    .map(([k]) => k)
-
-  if (enabledLabels.length === 0) {
-    updateConflatedFeatures([])
-    return
-  }
-
-  const sql = buildConflatedQuery(bbox, enabledLabels)
-  if (!sql) return
-
-  const result = await runQuery(sql)
-  const features = arrowToFeatures(result)
-  updateConflatedFeatures(features)
-}
-
 // ---- Interaction ----
 
 function handleClick(evt) {
   closePopup()
 
   map.value.forEachFeatureAtPixel(evt.pixel, (feature, lyr) => {
-    // Overture PMTiles: VectorTile RenderFeature — wrap before passing to popup
-    if (lyr === getOvertureLayer()) {
-      selectedFeature.value = wrapOvertureFeature(feature)
-      popupOverlay.value.setPosition(evt.coordinate)
-      return true
+    // All three data layers are now VectorTile/PMTiles. Route through the
+    // matching wrapper so PoiPopup gets a plain OL-Feature-ish object.
+    let wrapped = null
+    if (lyr === getOsmLayer()) {
+      wrapped = wrapOsmFeature(feature)
+    } else if (lyr === getOvertureLayer()) {
+      wrapped = wrapOvertureFeature(feature)
+    } else if (lyr === getConflatedLayer()) {
+      wrapped = wrapConflatedFeature(feature)
     }
+    if (!wrapped) return false
 
-    // OSM or Conflated VectorLayer (with Cluster)
-    const subFeatures = feature.get('features')
-    if (subFeatures && subFeatures.length > 1) {
-      const geom = feature.getGeometry()
-      map.value.getView().animate({
-        center: geom.getCoordinates(),
-        zoom: map.value.getView().getZoom() + 2,
-        duration: 300,
-      })
-      return true
-    }
-
-    const f = subFeatures ? subFeatures[0] : feature
-    const geom = f.getGeometry()
-    let coord
-    if (geom.getType() === 'Point') {
-      coord = geom.getCoordinates()
-    } else {
-      const ext = geom.getExtent()
-      coord = [(ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2]
-    }
-    selectedFeature.value = f
-    popupOverlay.value.setPosition(coord)
+    // VectorTile RenderFeatures expose getType() but only getFlatCoordinates(),
+    // not the full-Feature getCoordinates(). Anchoring the popup to the
+    // click location sidesteps the API mismatch and matches the long-standing
+    // Overture handler behaviour.
+    selectedFeature.value = wrapped
+    popupOverlay.value.setPosition(evt.coordinate)
     return true
   })
 }
@@ -424,12 +319,11 @@ watch(() => props.activeSource, (src) => {
   getOvertureLayer().setVisible(src === 'overture')
   getConflatedLayer().setVisible(src === 'conflated')
   closePopup()
-  loadData()
 })
 
 watch(
   () => props.osmFilters,
-  () => { if (props.activeSource === 'osm') loadData() },
+  (filters) => { updateOsmFilters(filters) },
   { deep: true }
 )
 
@@ -441,12 +335,8 @@ watch(
 
 watch(
   () => props.conflatedFilters,
-  () => { if (props.activeSource === 'conflated') loadData() },
+  (filters) => { updateConflatedFilters(filters) },
   { deep: true }
 )
-
-// Fire initial load once DuckDB is ready (covers the case where the view
-// never changes and moveend never fires).
-watch(duckReady, (isReady) => { if (isReady) loadData() })
 
 </script>

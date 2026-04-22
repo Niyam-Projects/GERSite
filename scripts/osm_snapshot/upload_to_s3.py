@@ -49,7 +49,7 @@ Prerequisites — AWS setup (manual steps, not automated here):
 """
 from config_versioned import Config
 
-from openpois.io.s3 import upload_partitioned_dataset
+from openpois.io.s3 import upload_partitioned_dataset, upload_single_file
 
 # -----------------------------------------------------------------------------
 # Configuration constants
@@ -58,6 +58,7 @@ from openpois.io.s3 import upload_partitioned_dataset
 config = Config("~/repos/openpois/config.yaml")
 
 PARTITIONED_DIR = config.get_file_path("snapshot_osm", "partitioned")
+PMTILES_PATH = config.get_file_path("snapshot_osm", "pmtiles")
 AWS_VERSION = config.get("versions", "aws")
 S3_BUCKET = config.get("upload", "s3_bucket")
 S3_PREFIX = config.get("upload", "s3_prefix_osm")
@@ -88,3 +89,19 @@ if __name__ == "__main__":
     )
     print(f"Uploaded {n:,} files.")
     print(f"Public base URL: {base_url}")
+
+    if PMTILES_PATH.exists():
+        pmtiles_key = f"{S3_PREFIX}/{AWS_VERSION}/{PMTILES_PATH.name}"
+        pmtiles_url = upload_single_file(
+            local_path = PMTILES_PATH,
+            bucket = S3_BUCKET,
+            s3_key = pmtiles_key,
+            s3_region = S3_REGION,
+            content_type = "application/octet-stream",
+        )
+        print(f"Uploaded PMTiles: {pmtiles_url}")
+    else:
+        print(
+            f"No PMTiles at {PMTILES_PATH} — skipping. "
+            "Run prepare_pmtiles.py to generate."
+        )

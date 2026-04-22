@@ -82,6 +82,7 @@ dependencies:
   - ruamel.yaml.clib=0.2.14=py312h4c3975b_0
   - setuptools=80.9.0=pyhff2d567_0
   - simdjson=4.2.2=hb700be7_0
+  - tippecanoe=2.79.0=hbd1d79c_0
   - tk=8.6.13=noxft_ha0e22de_103
   - tqdm=4.67.1=pyhd8ed1ab_1
   - truststore=0.10.3=pyhe01879c_0

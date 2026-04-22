@@ -44,11 +44,29 @@ Taxonomy-aware matching between rated OSM and Overture, then partition and uploa
    ```
    Outputs `conflated_partitioned/` (and OSM-only `osm_snapshot_partitioned/`).
 
-7. **Upload to S3**:
+6.5. **Build PMTiles** — single-zoom (z14) archives consumed directly by the
+     site via `ol-pmtiles`. Intermediate FlatGeobufs are cleaned up on success.
+     ```bash
+     python -u scripts/osm_snapshot/prepare_pmtiles.py \
+       2>&1 | tee ~/data/openpois/logs/pmtiles_osm_<version>.log
+     python -u scripts/conflation/prepare_pmtiles.py \
+       2>&1 | tee ~/data/openpois/logs/pmtiles_conflated_<version>.log
+     ```
+     Properties and zoom range are configured under `upload.pmtiles` in
+     `config.yaml`.
+
+7. **Upload to S3** — pushes partitioned parquet AND the matching `.pmtiles`
+   (single file at `…/<version>/<name>.pmtiles`) under `versions.aws`.
    ```bash
-   python scripts/conflation/upload_to_s3.py
+   python scripts/osm_snapshot/upload_to_s3.py     # OSM parquet + pmtiles
+   python scripts/conflation/upload_to_s3.py       # conflated parquet + pmtiles
    ```
-   Pushes to `s3://openpois-public/snapshots/...` under `versions.aws`.
+   To upload only the PMTiles (e.g., after regenerating tiles without touching
+   the parquet), use:
+   ```bash
+   python scripts/osm_snapshot/upload_pmtiles_to_s3.py [--s3-version YYYYMMDD]
+   python scripts/conflation/upload_pmtiles_to_s3.py  [--s3-version YYYYMMDD]
+   ```
 
 8. **Update latest-URL pointers** in `config.yaml`:
    ```yaml

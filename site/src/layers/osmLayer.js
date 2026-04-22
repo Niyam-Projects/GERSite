@@ -1,70 +1,92 @@
-import VectorSource from 'ol/source/Vector'
-import VectorLayer from 'ol/layer/Vector'
-import Cluster from 'ol/source/Cluster'
-import Feature from 'ol/Feature'
-import Point from 'ol/geom/Point'
-import { fromLonLat } from 'ol/proj'
-import { confidenceStyle } from './styleFactory.js'
-import { mergeColocated } from '../utils.js'
-import { CLUSTER_MAX_ZOOM } from '../constants.js'
+import VectorTileLayer from 'ol/layer/VectorTile'
+import { PMTilesVectorSource } from 'ol-pmtiles'
+import { Style, Circle, Fill, Stroke } from 'ol/style'
+import { confidenceColor, discretizeConf } from '../utils.js'
+import { OSM_PMTILES_URL } from '../constants.js'
 
-let vectorSource = null
-let clusterSource = null
+// OSM filter keys that drive feature visibility. A feature is visible when at
+// least one *enabled* key has a non-null value on it. If every filter is off,
+// nothing renders.
+const OSM_KEYS = [
+  'amenity', 'shop', 'leisure', 'healthcare',
+  'craft', 'historic', 'landuse', 'office', 'tourism',
+]
+
 let layer = null
+let enabledKeys = new Set(OSM_KEYS)  // default: all on
+
+const styleCache = {}
 
 export function getOsmLayer() {
   if (layer) return layer
 
-  vectorSource = new VectorSource()
-  clusterSource = new Cluster({
-    distance: 40,
-    minDistance: 20,
-    source: vectorSource,
-  })
-
-  layer = new VectorLayer({
-    source: clusterSource,
-    style: confidenceStyle,
+  layer = new VectorTileLayer({
+    source: new PMTilesVectorSource({ url: OSM_PMTILES_URL }),
+    style: osmTileStyle,
     zIndex: 10,
   })
-
   return layer
 }
 
-export function getOsmVectorSource() {
-  return vectorSource
+/**
+ * Update the set of enabled filter keys and redraw the layer in place.
+ * Called from MapContainer.vue whenever the OSM filter checkboxes change.
+ */
+export function updateOsmFilters(filtersObj) {
+  enabledKeys = new Set(
+    Object.entries(filtersObj).filter(([, v]) => v).map(([k]) => k)
+  )
+  if (layer) layer.changed()
 }
 
-/**
- * Update the OSM layer with features from an Arrow query result.
- */
-export function updateOsmFeatures(arrowFeatures) {
-  if (!vectorSource) return
-  vectorSource.clear()
+function osmTileStyle(feature) {
+  if (enabledKeys.size === 0) return null
 
-  const olFeatures = mergeColocated(arrowFeatures).map(f => {
-    const feature = new Feature({
-      geometry: new Point(fromLonLat([f.lon, f.lat])),
-    })
-    // Set all properties
-    for (const [k, v] of Object.entries(f.properties)) {
-      feature.set(k, v)
+  // Visibility: feature must have at least one enabled key set.
+  let visible = false
+  for (const k of enabledKeys) {
+    if (feature.get(k) != null) {
+      visible = true
+      break
     }
-    feature.set('_source', 'osm')
-    return feature
-  })
+  }
+  if (!visible) return null
 
-  vectorSource.addFeatures(olFeatures)
+  const conf = feature.get('conf_mean')
+  const bucket = discretizeConf(conf)
+  if (!styleCache[bucket]) {
+    const color = confidenceColor(conf == null || isNaN(conf) ? null : conf)
+    styleCache[bucket] = new Style({
+      image: new Circle({
+        radius: 5,
+        fill: new Fill({ color }),
+        stroke: new Stroke({ color: '#fff', width: 1 }),
+      }),
+    })
+  }
+  return styleCache[bucket]
 }
 
 /**
- * Toggle clustering based on zoom level.
+ * Wrap an immutable VectorTile RenderFeature in a plain object that exposes
+ * the OL-Feature-ish API used by PoiPopup.vue: .get(), .getKeys(), .getGeometry().
  */
-export function updateClusterMode(zoom) {
-  if (!clusterSource) return
-  if (zoom > CLUSTER_MAX_ZOOM) {
-    clusterSource.setDistance(0) // No clustering at high zoom
-  } else {
-    clusterSource.setDistance(40)
+export function wrapOsmFeature(rf) {
+  const props = {
+    _source: 'osm',
+    osm_id: rf.get('osm_id'),
+    name: rf.get('name'),
+    conf_mean: rf.get('conf_mean'),
+    source_dataset: 'OpenStreetMap',
+  }
+  // Copy any tag column that was baked into the tile
+  for (const k of OSM_KEYS) {
+    const v = rf.get(k)
+    if (v != null) props[k] = v
+  }
+  return {
+    get: (k) => props[k],
+    getKeys: () => Object.keys(props),
+    getGeometry: () => rf.getGeometry(),
   }
 }

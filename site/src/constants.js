@@ -7,15 +7,13 @@ import {
   OVERTURE_L0S,
 } from './taxonomy.generated.js'
 
-// S3 URLs
-export const OSM_S3_BASE =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260417/osm_snapshot_partitioned'
+// S3 URLs — PMTiles are the primary per-dataset archives. The site reads
+// them via ol-pmtiles; no DuckDB-WASM query path anymore.
+export const OSM_PMTILES_URL =
+  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260417/osm_snapshot.pmtiles'
 
-export const FSQ_S3_BASE =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/foursquare/20260313/foursquare_snapshot_partitioned'
-
-export const CONFLATED_S3_BASE =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260422/conflated_partitioned'
+export const CONFLATED_PMTILES_URL =
+  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260422/conflated.pmtiles'
 
 // Overture PMTiles (latest release — update URL on each Overture monthly release)
 export const OVERTURE_PMTILES_URL =
@@ -103,13 +101,9 @@ export const FSQ_CATEGORIES = [
   { key: 'Health and Medicine', label: 'Health & Medicine' },
 ]
 
-// Geohash config
-export const GEOHASH_PRECISION = 4
-export const MAX_GEOHASH_CELLS = 50
-
-// Zoom thresholds
-export const MIN_ZOOM_FOR_DATA = 14
-export const CLUSTER_MAX_ZOOM = 12
+// Zoom thresholds — PMTiles min_zoom (site can't zoom out below this).
+// Points above z14 are rendered via ol-pmtiles over-zoom.
+export const MIN_ZOOM = 14
 
 // Stadia Maps Geocoding
 export const STADIA_GEOCODING_URL =
