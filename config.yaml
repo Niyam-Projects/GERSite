@@ -138,7 +138,13 @@ osm_turnover_model:
   group_key: shared_label
   group_values: null
   min_value_count: 5
-  n_draws: 250
+  # NUTS warmup (window adaptation) and retained-sample counts. Warmup should
+  # generally be >= n_samples for hierarchical models.
+  n_warmup: 500
+  n_samples: 500
+  # Number of independent chains (vmapped in parallel). n_chains > 1 enables
+  # R-hat and bulk ESS diagnostics at roughly linear wall-time cost on CPU.
+  n_chains: 4
   save_full_model: true
 
 # Directory definitions (used with config.get_dir_path())
@@ -172,6 +178,8 @@ directories:
       fitted_params: fitted_params.csv
       param_draws: param_draws.csv
       predictions: predictions.csv
+      diagnostics: diagnostics.csv
+      inference_data: inference_data.nc
       fitted_model: fitted_model.pkl
   snapshot_foursquare:
     versioned: true

@@ -24,7 +24,9 @@ Config keys used (config.yaml):
     osm_turnover_model.default_model_type   — "constant" or "random_by_type"
                                               (overridable via --model-type)
     osm_turnover_model.var_prior            — (loc, scale) hyperprior on log_sigma
-    osm_turnover_model.n_draws              — number of posterior draws
+    osm_turnover_model.n_warmup             — NUTS warmup steps (adaptation)
+    osm_turnover_model.n_samples            — posterior draws retained
+    osm_turnover_model.n_chains             — number of NUTS chains (vmapped)
     osm_turnover_model.save_full_model      — save param_draws and pickled fitter
 
 Prerequisites:
@@ -33,6 +35,8 @@ Prerequisites:
 Output files (in ``model_output`` directory):
     fitted_params.csv   — posterior summaries per parameter
     predictions.csv     — P(change) at t = 0.0..10.0 years per group
+    diagnostics.csv     — per-parameter R-hat / bulk-ESS (multi-chain only)
+    inference_data.nc   — ArviZ InferenceData (optional, if arviz installed)
     param_draws.csv     — posterior draws (if save_full_model = true)
     fitted_model.pkl    — pickled ModelFitter (if save_full_model = true)
 """
@@ -60,7 +64,19 @@ GROUP_VALUES = config.get("osm_turnover_model", "group_values", fail_if_none = F
 MIN_VALUE_COUNT = config.get(
     "osm_turnover_model", "min_value_count", fail_if_none = False
 )
-N_DRAWS = config.get("osm_turnover_model", "n_draws")
+N_WARMUP = config.get("osm_turnover_model", "n_warmup", fail_if_none = False)
+N_SAMPLES = config.get("osm_turnover_model", "n_samples", fail_if_none = False)
+N_CHAINS = config.get("osm_turnover_model", "n_chains", fail_if_none = False)
+# Back-compat: older configs used `n_draws` for both warmup and sampling.
+_LEGACY_N_DRAWS = config.get(
+    "osm_turnover_model", "n_draws", fail_if_none = False
+)
+if N_WARMUP is None:
+    N_WARMUP = _LEGACY_N_DRAWS if _LEGACY_N_DRAWS is not None else 1_000
+if N_SAMPLES is None:
+    N_SAMPLES = _LEGACY_N_DRAWS if _LEGACY_N_DRAWS is not None else 1_000
+if N_CHAINS is None:
+    N_CHAINS = 1
 SAVE_FULL_MODEL = config.get("osm_turnover_model", "save_full_model")
 
 
@@ -137,8 +153,12 @@ if __name__ == "__main__":
         starting_params = model.starting_params,
         data = model.data,
         target = model.target,
-        num_draws = N_DRAWS,
+        num_warmup = N_WARMUP,
+        num_samples = N_SAMPLES,
+        num_chains = N_CHAINS,
         param_likelihood = model.param_likelihood,
+        derive_draws = model.derive_draws,
+        log_likelihood_fun = model.log_likelihood_fun,
         verbose = True,
     )
     fitter.fit()
@@ -176,6 +196,15 @@ if __name__ == "__main__":
     # Save ----------------------------------------------------------------->
     config.write(fitted_params, "model_output", "fitted_params")
     config.write(predictions, "model_output", "predictions")
+    if fitter.diagnostics is not None:
+        config.write(fitter.diagnostics, "model_output", "diagnostics")
+    try:
+        idata = fitter.to_inference_data()
+        idata.to_netcdf(
+            str(config.get_file_path("model_output", "inference_data"))
+        )
+    except ImportError:
+        print("arviz not installed — skipping inference_data.nc")
     if SAVE_FULL_MODEL:
         config.write(
             flatten_param_draws(fitter.get_parameter_draws()),
