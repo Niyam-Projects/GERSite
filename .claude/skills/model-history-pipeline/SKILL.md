@@ -21,23 +21,23 @@ End-to-end: Geofabrik full-history PBFs → observations table → fitted λ →
    ```
    Runs `osmium tags-filter --omit-referenced` then `osmium time-filter`, then pyosmium streams results. Controlled by `download.osm.*` in config.yaml.
 
-2. **Format tabular observations** → `osm_observations_{tag_key}.csv`
+2. **Format tabular observations** → `osm_observations.csv`
    ```bash
    python scripts/osm_data/format_tabular.py
    ```
-   Uses `osm_data.tag_key` (e.g., `name`) to produce one observation row per version with change/deletion flags.
+   Uses `osm_data.tag_key` (e.g., `name`) to flag change/deletion per POI version, then assigns shared taxonomy labels from the conflation crosswalk and explodes rows per label. One row = (POI version, shared_label). Rows with no matching taxonomy category are dropped.
 
 3. **Pick a modeling config and fit λ** — see [skills/iterate-model-types](../iterate-model-types/SKILL.md) for choosing `model_type` / `group_key`.
    ```bash
    python scripts/models/osm_turnover.py
    ```
-   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv`, `fitted_model.pkl` to `{date}_by_{group_key}` (or `{date}_constant`) under `directories.model_output.path`.
+   Writes `fitted_params.csv`, `param_draws.csv`, `predictions.csv`, `fitted_model.pkl` to `{date}_by_shared_label` (the unified random-effects model) or `{date}_constant` (single-rate baseline) under `directories.model_output.path`.
 
 4. **Apply predictions to the OSM snapshot** → `osm_snapshot_rated.parquet`
    ```bash
    python scripts/osm_snapshot/apply_model.py
    ```
-   Reads the `osm_data.apply_model.model_stub` date, loads all `{stub}_by_*` dirs (plus a `{stub}_constant` fallback), and rates every POI in `osm_snapshot.parquet`.
+   Reads the `osm_data.apply_model.model_stub` date, loads the `{stub}_by_shared_label` random-effects model (if present), falls back to `{stub}_constant` for rows with no matching taxonomy label, and rates every POI in `osm_snapshot.parquet`.
 
 ## Verification
 

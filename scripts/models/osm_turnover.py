@@ -1,20 +1,28 @@
 """
 Fit an empirical Bayes JAX model for OSM POI tag change rates.
 
-Reads ``osm_observations_{tag_key}.csv`` and fits a Poisson change-rate model
-using BlackJAX NUTS. The model estimates a per-group change rate λ (events
-per year). Predictions give the probability that a tag changes within t years
-for t = 0.0, 0.1, ..., 10.0. Supports ``constant`` and ``random_by_type``
-model specifications.
+Reads ``osm_observations.csv`` (produced by ``osm_data/format_tabular.py``,
+one row per (POI version, shared_label)) and fits a Poisson change-rate
+model using BlackJAX NUTS. The model estimates a per-group change rate λ
+(events per year). Predictions give the probability that a tag changes
+within t years for t = 0.0, 0.1, ..., 10.0. Supports ``constant`` and
+``random_by_type`` model specifications.
+
+Random effects are grouped by shared taxonomy label
+(``osm_turnover_model.group_key: shared_label`` — the default) so that all
+POIs are compared apples-to-apples under a single unified model, instead of
+one model per OSM tag key.
 
 Config keys used (config.yaml):
     directories.osm_data                    — input data directory
     directories.model_output                — output directory for results
-    osm_turnover_model.tag_key              — tag key to model (e.g. "amenity")
-    osm_turnover_model.group_key            — column to group by (null = constant)
+    osm_turnover_model.group_key            — column to group by (null =
+                                              constant model; default
+                                              "shared_label")
     osm_turnover_model.group_values         — subset of group values (null = all)
     osm_turnover_model.min_value_count      — minimum observations to include a group
-    osm_turnover_model.model_type           — "constant" or "random_by_type"
+    osm_turnover_model.default_model_type   — "constant" or "random_by_type"
+                                              (overridable via --model-type)
     osm_turnover_model.var_prior            — (loc, scale) hyperprior on log_sigma
     osm_turnover_model.n_draws              — number of posterior draws
     osm_turnover_model.save_full_model      — save param_draws and pickled fitter
@@ -29,6 +37,7 @@ Output files (in ``model_output`` directory):
     fitted_model.pkl    — pickled ModelFitter (if save_full_model = true)
 """
 
+import argparse
 import pickle
 
 import jax.numpy as jnp
@@ -44,9 +53,8 @@ from openpois.models.setup import prepare_data_for_model
 # Globals
 config = Config("~/repos/openpois/config.yaml")
 
-DATA_DIR = config.get_dir_path("osm_data")
 MODEL_DIR = config.get_dir_path("model_output")
-TAG_KEY = config.get("osm_turnover_model", "tag_key")
+OBSERVATIONS_PATH = config.get_file_path("osm_data", "osm_observations")
 GROUP_KEY = config.get("osm_turnover_model", "group_key", fail_if_none = False)
 GROUP_VALUES = config.get("osm_turnover_model", "group_values", fail_if_none = False)
 MIN_VALUE_COUNT = config.get(
@@ -81,11 +89,24 @@ def flatten_param_draws(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description = "Fit a JAX turnover model over OSM observations.",
+    )
+    parser.add_argument(
+        "--model-type",
+        choices = ["constant", "random_by_type"],
+        default = None,
+        help = (
+            "Override osm_turnover_model.default_model_type for this run."
+        ),
+    )
+    args = parser.parse_args()
+
     MODEL_DIR.mkdir(parents = True, exist_ok = True)
     config.write_self("model_output")
 
     # Data preparation ------------------------------------------------------>
-    observations_df = pd.read_csv(DATA_DIR / f"osm_observations_{TAG_KEY}.csv")
+    observations_df = pd.read_csv(OBSERVATIONS_PATH)
     obs_sub = prepare_data_for_model(
         data = observations_df,
         group_key = GROUP_KEY,
@@ -96,7 +117,10 @@ if __name__ == "__main__":
     )
 
     # Build model + fitter -------------------------------------------------->
-    model_type = config.get("osm_turnover_model", "model_type")
+    model_type = args.model_type or config.get(
+        "osm_turnover_model", "default_model_type"
+    )
+    print(f"Model type: {model_type}")
     model = get_model_class(model_type)(
         dataset = obs_sub,
         metadata = {

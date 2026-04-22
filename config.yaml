@@ -1,7 +1,7 @@
 # Versioned directories (used with config.get_dir_path())
 versions:
   osm_data: "20260416"
-  model_output: "20260421_constant"
+  model_output: "20260421_by_shared_label"
   snapshot_osm: "20260417"
   snapshot_overture: "20260417"
   snapshot_foursquare: "20260416"
@@ -130,10 +130,12 @@ osm_data:
 
 # Settings for scripts/models/osm_turnover.py (JAX turnover model)
 osm_turnover_model:
-  model_type: constant
-  tag_key: name
+  # Overridable at the CLI via --model-type {constant,random_by_type}.
+  default_model_type: constant
   var_prior: [-1.0, 5.0]
-  group_key: null
+  # Column in osm_observations.csv for grouping random effects.
+  # "shared_label" = shared taxonomy category
+  group_key: shared_label
   group_values: null
   min_value_count: 5
   n_draws: 250
@@ -161,6 +163,8 @@ directories:
       # Legacy Overpass-based pipeline (still used by scripts/osm_data/download.py)
       osm_elements: osm_elements.csv
       osm_failed_elements: osm_failed_elements.csv
+      # Modelling-ready observations (one row per POI version × shared_label)
+      osm_observations: osm_observations.csv
   model_output:
     versioned: true
     path: ~/data/openpois/osm_turnover_model

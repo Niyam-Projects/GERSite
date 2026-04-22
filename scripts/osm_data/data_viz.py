@@ -1,27 +1,35 @@
 """
 Plot OSM tag stability curves from observation data.
 
-Reads osm_observations_{tag_key}.csv and computes Kaplan-Meier-style survival
-estimates showing what fraction of tag assignments remain unchanged over time.
-Saves two types of PNG figures:
-    1. Overall stability curve — all tags pooled into a single panel.
-    2. Per-subtype multi-panel curves — top-N values for each key in
-       download_keys, shown as separate facets on one figure per key.
+Reads ``osm_observations.csv`` (one row per (POI version, shared_label)) and
+computes Kaplan-Meier-style survival estimates showing what fraction of
+observations remain unchanged over time. Saves two types of PNG figures:
+
+    1. Overall stability curve — all observations pooled into a single panel.
+       (Note: rows are duplicated per shared_label, so POIs mapping to
+       multiple taxonomy categories are over-represented here.)
+    2. Per-shared-label multi-panel curves — top-N shared labels by row
+       count, shown as separate facets.
 
 Config keys used (config.yaml):
     directories.osm_data           — directory containing input CSV and viz/ output
-    download.download_keys         — tag keys used as grouping variables for subplots
-    osm_data.tag_key               — the tag being analysed (e.g. "amenity")
+    osm_data.tag_key               — tag key whose changes define observation
+                                     events (used only in plot titles)
     osm_data.timestamp_cols        — columns to parse as timestamps (rows with nulls dropped)
-    osm_data.top_n_types           — number of top subtype values per multi-panel figure
+    osm_data.top_n_types           — number of top shared labels in the multi-panel figure
     download.osm.end_date          — right-censoring date for still-unchanged tags
+    osm_data.apply_model.model_stub — stub for loading model predictions
 
 Prerequisites:
     Run osm_data/format_tabular.py first.
 
 Output files (in osm_data/viz/):
-    osm_changes_{tag_key}_all.png             — overall survival curve
-    osm_changes_{tag_key}_{key}.png           — per-subtype facet grid, one per key
+    osm_changes_all.png                     — overall survival curve
+    osm_changes_all_preds.png               — overall curve with constant-model
+                                              prediction overlay
+    osm_changes_by_shared_label.png         — per-label facet grid
+    osm_changes_shared_label_preds_<label>.png — per-label curves with
+                                                 shared-label model predictions
 """
 
 import numpy as np
@@ -43,12 +51,13 @@ from openpois.osm.change_plots import (  # noqa: E402
 config = Config("~/repos/openpois/config.yaml")
 
 SAVE_DIR = config.get_dir_path("osm_data")
+OBSERVATIONS_PATH = config.get_file_path("osm_data", "osm_observations")
 VIZ_DIR = SAVE_DIR / "viz"
-OSM_KEYS = config.get("download", "osm", "filter_keys")
 TAG_KEY = config.get("osm_data", "tag_key")
 END_DATE = pd.Timestamp(config.get("download", "osm", "end_date"), tz='UTC')
 MODEL_BASE = config.get_dir_path("model_output").parent
 MODEL_STUB = config.get("osm_data", "apply_model", "model_stub")
+SHARED_LABEL_VERSION = f"{MODEL_STUB}_by_shared_label"
 
 max_days = 365 * 10
 VIZ_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,17 +91,12 @@ def fig_save(
     )
 
 def get_preds_dict(model_stub: str | None) -> dict[str, pd.DataFrame]:
-    """
-    Load model predictions from the model output directory.
-    """
-    model_output_dir = config.get_dir_path("model_output")
+    """Load constant and shared-label model predictions."""
     if model_stub is None:
         return dict()
-    def get_preds_df(model_stub: str, subset: str | None = None) -> Path:
-        if subset is None:
-            preds_fp = MODEL_BASE / f"{model_stub}_constant/predictions.csv"
-        else:
-            preds_fp = MODEL_BASE / f"{model_stub}_by_{subset}/predictions.csv"
+
+    def get_preds_df(version: str) -> pd.DataFrame | None:
+        preds_fp = MODEL_BASE / version / "predictions.csv"
         if not preds_fp.exists():
             return None
         return pd.read_csv(preds_fp).assign(
@@ -101,11 +105,11 @@ def get_preds_dict(model_stub: str | None) -> dict[str, pd.DataFrame]:
             conf_lower = (1.0 - pd.col('p_upper')),
             conf_upper = (1.0 - pd.col('p_lower')),
         )
-    preds = dict()
-    preds["constant"] = get_preds_df(model_stub)
-    for subset in OSM_KEYS:
-        preds[subset] = get_preds_df(model_stub, subset)
-    return preds
+
+    return {
+        "constant": get_preds_df(f"{model_stub}_constant"),
+        "shared_label": get_preds_df(SHARED_LABEL_VERSION),
+    }
 
 
 # ----------------------------------------------------------------------------------------
@@ -120,7 +124,7 @@ if __name__ == "__main__":
     #   observation timestamp will be missing for these rows
     timestamp_cols = config.get("osm_data", "timestamp_cols")
     observations_df = (
-        pd.read_csv(SAVE_DIR / f"osm_observations_{TAG_KEY}.csv")
+        pd.read_csv(OBSERVATIONS_PATH)
         .dropna(subset = timestamp_cols)
     )
     for timestamp_col in timestamp_cols:
@@ -169,9 +173,9 @@ if __name__ == "__main__":
         x_label = "Years since tag",
         y_label = "Proportion remaining unchanged",
     )
-    fig_save(fig, stub = f"osm_changes_{TAG_KEY}_all")
+    fig_save(fig, stub = "osm_changes_all")
 
-    if 'constant' in preds:
+    if preds.get('constant') is not None:
         fig = change_plot_create(
             observations = to_plot_df,
             predictions = preds['constant'],
@@ -183,48 +187,53 @@ if __name__ == "__main__":
             x_label = "Years since tag",
             y_label = "Proportion remaining unchanged",
         )
-        fig_save(fig, stub = f"osm_changes_{TAG_KEY}_all_preds")
+        fig_save(fig, stub = "osm_changes_all_preds")
 
-    # Create multi-panel plots for the top tags in each OSM category. Only
-    # iterate keys that are actually columns in the observations CSV — the
-    # snapshot pipeline's filter_keys list can expand without the observations
-    # CSV being regenerated, so we defend against the mismatch here.
+    # Multi-panel plot faceted by the top shared labels.
     TOP_N_TYPES = config.get("osm_data", "top_n_types")
-    present_keys = [k for k in OSM_KEYS if k in to_plot_df.columns]
-    for subtype in present_keys:
-        fig = change_multiplot_create(
-            observations = to_plot_df,
-            col = subtype,
-            top_n = TOP_N_TYPES,
-            no_change_col = 'no_change',
-            change_col = 'change',
-            final_observation_col = 'final_obs',
-            title = f"Stability of the `{TAG_KEY}` tag over time by {subtype}",
-            subtitle = (
-                f"Top {TOP_N_TYPES} {subtype} tags by number of observations"
-            ),
-            x_label = "Years since tag",
-            y_label = "Proportion remaining unchanged",
-            day_range = max_days,
+    fig = change_multiplot_create(
+        observations = to_plot_df,
+        col = "shared_label",
+        top_n = TOP_N_TYPES,
+        no_change_col = 'no_change',
+        change_col = 'change',
+        final_observation_col = 'final_obs',
+        title = f"Stability of the `{TAG_KEY}` tag over time by shared label",
+        subtitle = (
+            f"Top {TOP_N_TYPES} shared labels by number of observations"
+        ),
+        x_label = "Years since tag",
+        y_label = "Proportion remaining unchanged",
+        day_range = max_days,
+    )
+    fig_save(fig = fig, stub = "osm_changes_by_shared_label")
+
+    if preds.get('shared_label') is not None:
+        top_n_labels = (
+            to_plot_df["shared_label"].value_counts().head(TOP_N_TYPES).index
         )
-        fig_save(fig = fig, stub = f"osm_changes_{TAG_KEY}_{subtype}")
-
-        if subtype in preds:
-            top_n_tags = to_plot_df[subtype].value_counts().head(TOP_N_TYPES).index
-            pred_groups = preds[subtype]['group_name'].unique().tolist()
-            keep_preds = list(set(top_n_tags) & set(pred_groups))
-            for pred_tag in keep_preds:
-                print(f"Plotting {subtype}={pred_tag}")
-                fig = change_plot_create(
-                    observations = to_plot_df.query(f"{subtype} == @pred_tag"),
-                    predictions = preds[subtype].query(f"group_name == @pred_tag"),
-                    no_change_col = 'no_change',
-                    change_col = 'change',
-                    final_observation_col = 'final_obs',
-                    day_range = max_days,
-                    title = f"Stability of the `{TAG_KEY}` tag over time: {pred_tag}",
-                    x_label = "Years since tag",
-                    y_label = "Proportion remaining unchanged",
-                )
-                fig_save(fig, stub = f"osm_changes_{TAG_KEY}_{subtype}_preds_{pred_tag}")
-
+        pred_groups = preds['shared_label']['group_name'].unique().tolist()
+        keep_preds = list(set(top_n_labels) & set(pred_groups))
+        for pred_label in keep_preds:
+            print(f"Plotting shared_label = {pred_label}")
+            fig = change_plot_create(
+                observations = to_plot_df.query(
+                    "shared_label == @pred_label"
+                ),
+                predictions = preds['shared_label'].query(
+                    "group_name == @pred_label"
+                ),
+                no_change_col = 'no_change',
+                change_col = 'change',
+                final_observation_col = 'final_obs',
+                day_range = max_days,
+                title = (
+                    f"Stability of the `{TAG_KEY}` tag over time: {pred_label}"
+                ),
+                x_label = "Years since tag",
+                y_label = "Proportion remaining unchanged",
+            )
+            fig_save(
+                fig,
+                stub = f"osm_changes_shared_label_preds_{pred_label}",
+            )

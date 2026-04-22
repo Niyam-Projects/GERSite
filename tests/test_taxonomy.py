@@ -272,6 +272,167 @@ class TestAssignOsmSharedLabel:
         assert labels[1] == ""
 
 
+class TestAssignOsmSharedLabelReturnAll:
+    """Multi-label (return_all=True) path used by the model-training
+    pipeline."""
+
+    def test_multi_specific_matches(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        """A row with specific matches on two keys gets both labels."""
+        gdf = pd.DataFrame(
+            {
+                "amenity": ["restaurant"],
+                "shop": ["supermarket"],
+            }
+        )
+        labels, radii = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["shop", "amenity"], return_all = True,
+        )
+        assert sorted(labels[0]) == ["Restaurant", "Supermarket"]
+        assert sorted(radii[0]) == sorted([100.0, 200.0])
+
+    def test_wildcard_suppressed_by_any_specific(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        """If any specific match fires, no wildcard label is added
+        to the row — even when another key is wildcard-eligible."""
+        gdf = pd.DataFrame(
+            {
+                "amenity": ["bank"],       # wildcard only → Other Amenity
+                "shop": ["supermarket"],   # specific → Supermarket
+            }
+        )
+        labels, _ = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["shop", "amenity"], return_all = True,
+        )
+        assert labels[0] == ["Supermarket"]
+
+    def test_wildcard_order_first_csv_wins(self, mini_match_radii):
+        """Rows with no specific matches get at most one wildcard
+        label, chosen by crosswalk (CSV) row order — not
+        filter_keys order."""
+        # Deliberately place `shop,*` *before* `amenity,*` so the
+        # ordering result is independent of what the real
+        # production CSV does.
+        crosswalk = pd.DataFrame(
+            {
+                "osm_key": ["shop", "amenity"],
+                "osm_value": ["*", "*"],
+                "shared_label": ["Other Shop", "Other Amenity"],
+            }
+        )
+        gdf = pd.DataFrame(
+            {
+                "amenity": ["weird1"],
+                "shop": ["weird2"],
+            }
+        )
+        labels, _ = assign_osm_shared_label(
+            gdf, crosswalk, mini_match_radii,
+            ["shop", "amenity"], return_all = True,
+        )
+        # `shop,*` appears first in the crosswalk -> wins.
+        assert labels[0] == ["Other Shop"]
+
+        # Swap crosswalk order; now `amenity,*` should win.
+        crosswalk2 = crosswalk.iloc[::-1].reset_index(drop = True)
+        labels2, _ = assign_osm_shared_label(
+            gdf, crosswalk2, mini_match_radii,
+            ["shop", "amenity"], return_all = True,
+        )
+        assert labels2[0] == ["Other Amenity"]
+
+    def test_no_match_returns_empty_list(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        """Rows with unmapped keys and no wildcard get an empty list."""
+        gdf = pd.DataFrame(
+            {
+                "amenity": [None],
+                "shop": [None],
+                "leisure": ["unknown_value"],  # leisure has no wildcard
+            }
+        )
+        labels, radii = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["shop", "amenity", "leisure"], return_all = True,
+        )
+        assert labels[0] == []
+        assert radii[0] == []
+
+    def test_duplicate_labels_are_deduped(self, mini_match_radii):
+        """Two keys mapping to the same shared label collapse to one
+        entry."""
+        crosswalk = pd.DataFrame(
+            {
+                "osm_key": ["amenity", "leisure"],
+                "osm_value": ["park", "park"],
+                "shared_label": ["Park", "Park"],
+            }
+        )
+        gdf = pd.DataFrame(
+            {
+                "amenity": ["park"],
+                "leisure": ["park"],
+            }
+        )
+        labels, _ = assign_osm_shared_label(
+            gdf, crosswalk, mini_match_radii,
+            ["amenity", "leisure"], return_all = True,
+        )
+        assert labels[0] == ["Park"]
+
+    def test_empty_dataframe(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        gdf = pd.DataFrame(
+            {"amenity": pd.Series(dtype = str)}
+        )
+        labels, radii = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["amenity"], return_all = True,
+        )
+        assert labels == []
+        assert radii == []
+
+    def test_mixed_specific_and_wildcard_only_rows(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        """A row-level test: one row has a specific match, another
+        has only a wildcard-eligible key."""
+        gdf = pd.DataFrame(
+            {
+                "amenity": ["restaurant", "bank"],
+                "shop": [None, None],
+            }
+        )
+        labels, _ = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["shop", "amenity"], return_all = True,
+        )
+        assert labels[0] == ["Restaurant"]
+        assert labels[1] == ["Other Amenity"]
+
+    def test_return_all_false_still_returns_ndarrays(
+        self, mini_osm_crosswalk, mini_match_radii,
+    ):
+        """Regression guard — the existing conflation-facing path
+        must keep returning numpy arrays."""
+        gdf = pd.DataFrame(
+            {"amenity": ["restaurant"], "shop": [None]}
+        )
+        labels, radii = assign_osm_shared_label(
+            gdf, mini_osm_crosswalk, mini_match_radii,
+            ["shop", "amenity"],
+        )
+        assert isinstance(labels, np.ndarray)
+        assert isinstance(radii, np.ndarray)
+        assert labels[0] == "Restaurant"
+
+
 # -----------------------------------------------------------------
 # Overture shared-label assignment
 # -----------------------------------------------------------------

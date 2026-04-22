@@ -123,74 +123,200 @@ def assign_osm_shared_label(
     match_radii: pd.DataFrame,
     filter_keys: list[str],
     default_radius_m: float = 100.0,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_all: bool = False,
+) -> (
+    tuple[np.ndarray, np.ndarray]
+    | tuple[list[list[str]], list[list[float]]]
+):
     """
-    Assign a ``shared_label`` and ``match_radius_m`` to each OSM POI.
+    Assign shared taxonomy labels to each OSM POI.
 
-    Uses *filter_keys* in priority order (first non-null match wins),
-    falling back to the wildcard row for that key if the specific
-    value is not in the crosswalk.
+    Two modes, selected by ``return_all``:
 
-    Returns:
-        (shared_label ndarray of object, match_radius_m ndarray of
-        float)
+    * ``return_all=False`` (default) — produces a single label per row.
+      Uses ``filter_keys`` in priority order (first non-null match wins),
+      falling back to the per-key wildcard row if the specific value
+      is not in the crosswalk. Returns ``(label, radius)`` as object /
+      float64 ndarrays of length ``len(gdf)``. Unmatched rows have
+      ``label == ""`` and ``radius == default_radius_m``. This is the
+      path used by the conflation pipeline and snapshot model
+      application.
+
+    * ``return_all=True`` — produces zero or more labels per row,
+      used by the model-training pipeline which duplicates
+      observations across every applicable taxonomy category.
+
+      Pass 1 (specific matches): for every ``filter_key``, every row
+      whose value for that key is in the crosswalk receives that
+      label. A row can collect multiple specific labels.
+
+      Pass 2 (wildcard fallback): applied *only* to rows that had
+      zero specific matches in pass 1. Within such a row, wildcard
+      keys are walked in the order they appear in the crosswalk CSV
+      (``_build_osm_label_lookups`` populates the ``wildcards`` dict
+      via ``iterrows``, preserving CSV order via dict insertion
+      order); the first wildcard key with a non-null/non-empty value
+      wins and is the only wildcard label assigned.
+
+      Returns ``(labels_per_row, radii_per_row)`` as lists of lists;
+      each inner list has ``>=0`` entries and is de-duplicated (if
+      two keys map to the same label, it appears once).
     """
     n = len(gdf)
-    label = np.full(n, "", dtype = object)
-    radius = np.full(n, default_radius_m, dtype = np.float64)
-    matched = np.zeros(n, dtype = bool)
-
     lookups, wildcards = _build_osm_label_lookups(osm_crosswalk)
 
-    # Build radius dict from match_radii DataFrame
     radii_dict: dict[str, float] = {}
     for _, row in match_radii.iterrows():
         radii_dict[row["shared_label"]] = float(
             row["match_radius_m"]
         )
 
+    if not return_all:
+        label = np.full(n, "", dtype = object)
+        radius = np.full(n, default_radius_m, dtype = np.float64)
+        matched = np.zeros(n, dtype = bool)
+
+        for key in filter_keys:
+            if key not in gdf.columns:
+                continue
+
+            col = gdf[key]
+            has_value = col.notna() & (col != "") & ~matched
+            if not has_value.any():
+                continue
+
+            eligible_idx = np.where(has_value)[0]
+            eligible_vals = col.to_numpy()[eligible_idx]
+
+            lkp = lookups.get(key)
+            if lkp is not None:
+                mapped_label = (
+                    pd.Series(eligible_vals, dtype = str).map(lkp)
+                )
+                found = mapped_label.notna().to_numpy()
+                pos = eligible_idx[found]
+                labels_found = mapped_label.to_numpy()[found]
+                label[pos] = labels_found
+                radius[pos] = np.array(
+                    [
+                        radii_dict.get(lb, default_radius_m)
+                        for lb in labels_found
+                    ]
+                )
+                matched[pos] = True
+
+                not_found = eligible_idx[~found]
+            else:
+                not_found = eligible_idx
+
+            wildcard_label = wildcards.get(key)
+            if wildcard_label is not None and len(not_found) > 0:
+                label[not_found] = wildcard_label
+                radius[not_found] = radii_dict.get(
+                    wildcard_label, default_radius_m,
+                )
+                matched[not_found] = True
+
+        return label, radius
+
+    # --- return_all=True path ------------------------------------
+
+    specific_frames: list[pd.DataFrame] = []
     for key in filter_keys:
         if key not in gdf.columns:
             continue
-
-        col = gdf[key]
-        has_value = col.notna() & (col != "") & ~matched
-        if not has_value.any():
-            continue
-
-        eligible_idx = np.where(has_value)[0]
-        eligible_vals = col.to_numpy()[eligible_idx]
-
         lkp = lookups.get(key)
-        if lkp is not None:
-            mapped_label = (
-                pd.Series(eligible_vals, dtype = str).map(lkp)
+        if lkp is None:
+            continue
+        col = gdf[key]
+        mask = col.notna() & (col != "")
+        if not mask.any():
+            continue
+        eligible_idx = np.where(mask)[0]
+        eligible_vals = col.to_numpy()[eligible_idx]
+        mapped = pd.Series(eligible_vals, dtype = str).map(lkp)
+        hit = mapped.notna().to_numpy()
+        if not hit.any():
+            continue
+        specific_frames.append(
+            pd.DataFrame(
+                {
+                    "row_idx": eligible_idx[hit],
+                    "label": mapped.to_numpy()[hit],
+                }
             )
-            found = mapped_label.notna().to_numpy()
-            pos = eligible_idx[found]
-            labels_found = mapped_label.to_numpy()[found]
-            label[pos] = labels_found
-            radius[pos] = np.array(
-                [
-                    radii_dict.get(lb, default_radius_m)
-                    for lb in labels_found
-                ]
+        )
+
+    rows_with_specific = np.zeros(n, dtype = bool)
+    if specific_frames:
+        specific_df = pd.concat(specific_frames, ignore_index = True)
+        rows_with_specific[specific_df["row_idx"].to_numpy()] = True
+    else:
+        specific_df = pd.DataFrame(
+            {"row_idx": pd.Series(dtype = np.int64),
+             "label": pd.Series(dtype = object)},
+        )
+
+    # Pass 2: one wildcard per row at most, in CSV order.
+    wildcard_frames: list[pd.DataFrame] = []
+    wildcard_assigned = np.zeros(n, dtype = bool)
+    for key, wildcard_label in wildcards.items():
+        if key not in gdf.columns:
+            continue
+        col = gdf[key]
+        mask = (
+            col.notna()
+            & (col != "")
+            & ~rows_with_specific
+            & ~wildcard_assigned
+        )
+        if not mask.any():
+            continue
+        eligible_idx = np.where(mask)[0]
+        wildcard_frames.append(
+            pd.DataFrame(
+                {
+                    "row_idx": eligible_idx,
+                    "label": np.full(
+                        len(eligible_idx), wildcard_label, dtype = object,
+                    ),
+                }
             )
-            matched[pos] = True
+        )
+        wildcard_assigned[eligible_idx] = True
 
-            not_found = eligible_idx[~found]
-        else:
-            not_found = eligible_idx
+    if wildcard_frames:
+        wildcard_df = pd.concat(wildcard_frames, ignore_index = True)
+    else:
+        wildcard_df = pd.DataFrame(
+            {"row_idx": pd.Series(dtype = np.int64),
+             "label": pd.Series(dtype = object)},
+        )
 
-        wildcard_label = wildcards.get(key)
-        if wildcard_label is not None and len(not_found) > 0:
-            label[not_found] = wildcard_label
-            radius[not_found] = radii_dict.get(
-                wildcard_label, default_radius_m,
-            )
-            matched[not_found] = True
+    long_df = pd.concat([specific_df, wildcard_df], ignore_index = True)
+    if len(long_df) == 0:
+        empty_labels: list[list[str]] = [[] for _ in range(n)]
+        empty_radii: list[list[float]] = [[] for _ in range(n)]
+        return empty_labels, empty_radii
 
-    return label, radius
+    long_df = long_df.drop_duplicates(subset = ["row_idx", "label"])
+    long_df["radius"] = (
+        long_df["label"]
+        .map(radii_dict)
+        .fillna(default_radius_m)
+        .astype(np.float64)
+    )
+
+    grouped = long_df.groupby("row_idx").agg(
+        labels = ("label", list),
+        radii = ("radius", list),
+    )
+    labels_by_row = grouped["labels"].to_dict()
+    radii_by_row = grouped["radii"].to_dict()
+
+    labels_per_row = [labels_by_row.get(i, []) for i in range(n)]
+    radii_per_row = [radii_by_row.get(i, []) for i in range(n)]
+    return labels_per_row, radii_per_row
 
 
 # -----------------------------------------------------------------

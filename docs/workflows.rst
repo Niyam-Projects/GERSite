@@ -92,8 +92,9 @@ See :mod:`openpois.io.osm_history`.
    python scripts/osm_data/format_tabular.py
 
 Converts raw version histories into one-row-per-observation records, each
-flagged for whether the configured tag changed. Output:
-``osm_observations_{tag_key}.csv``.
+flagged for whether the configured ``osm_data.tag_key`` changed, then
+assigns a shared taxonomy label and explodes rows for POIs mapping to
+multiple labels. Output: ``osm_observations.csv``.
 
 See :mod:`openpois.osm.format_observations`.
 
