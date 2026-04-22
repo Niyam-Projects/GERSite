@@ -39,7 +39,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 |---|---|
 | [src/openpois/io/](../src/openpois/io/) | I/O adapters: OSM history/snapshot, Overture, Foursquare, Census boundary |
 | [src/openpois/osm/](../src/openpois/osm/) | OSM-specific transforms: `format_observations`, `change_plots` |
-| [src/openpois/models/](../src/openpois/models/) | PyTorch empirical Bayes: `EventRate`, `ModelFitter`, model registry |
+| [src/openpois/models/](../src/openpois/models/) | JAX/BlackJAX empirical Bayes: `ModelFitter`, model registry |
 | [src/openpois/conflation/](../src/openpois/conflation/) | OSM×Overture matching: `taxonomy`, `match`, `merge` |
 | [scripts/](../scripts/) | End-to-end pipelines using config.yaml — not installed, reference only |
 | [site/](../site/) | Vue 3 + Vite frontend |
@@ -49,6 +49,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 - [docs/data-sources.md](docs/data-sources.md) — URLs, auth, schema quirks for every source
 - [docs/taxonomy-setup.md](docs/taxonomy-setup.md) — crosswalk CSVs, build_taxonomy.py, frontend sync
 - [docs/data-versioning.md](docs/data-versioning.md) — `versions:` block, path resolution, external references
+- [docs/turnover-model-methodology.md](docs/turnover-model-methodology.md) — statistical derivation of the POI turnover model with ZIE extension
 
 ## Running to-do
 

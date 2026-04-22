@@ -87,3 +87,12 @@ if __name__ == "__main__":
         chunk_dir = CHUNK_DIR,
         verbose = VERBOSE,
     )
+
+    # -------------------------------------------------------------------------
+    # Clean up intermediates
+    # -------------------------------------------------------------------------
+    if OUTPUT_PATH.exists() and OUTPUT_PATH.stat().st_size > 0:
+        for p in (RAW_PBF, FILTERED_PBF, RAW_PR_PBF, FILTERED_PR_PBF):
+            if p.exists():
+                print(f"Removing intermediate {p} ...")
+                p.unlink()

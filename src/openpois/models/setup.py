@@ -1,32 +1,8 @@
 """
-Prepare environment for OpenPOI models.
+Data-preparation helpers for OSM turnover models.
 """
 
 import pandas as pd
-import torch
-import torch_continuum as tc
-
-
-def pytorch_setup(optimize_level: str = 'fast', verbose: bool = False) -> str:
-    """
-    Set up PyTorch and torch_continuum for OpenPOI models.
-
-    Args:
-        optimize_level: Optimization level for torch_continuum.
-            'safe': No precision impact
-            'fast': Minor optimization (default).
-            'max': High optimization, best for LLMs or large transformers.
-
-    Returns:
-        str: Device name.
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if verbose:
-        print("Running on", device)
-    torch.set_default_device(device)
-    torch.set_default_dtype(torch.float64)
-    tc.optimize(optimize_level, verbose = verbose)
-    return device
 
 
 def prepare_data_for_model(
@@ -34,17 +10,24 @@ def prepare_data_for_model(
     group_key: str | None = None,
     group_values: list[str] | None = None,
     min_value_count: int | None = None,
-    t1_col: str = 'last_tag_timestamp',
+    t1_col: str = 'last_obs_timestamp',
     t2_col: str = 'obs_timestamp',
 ) -> pd.DataFrame:
     """
     Prepare an observations DataFrame for model fitting.
 
-    Optionally filters to rows belonging to IDs that have the group_key
-    present, subsets to specific group values, and drops groups below a
-    minimum observation count. Converts timestamp columns to datetime and
-    computes tag_days / tag_years elapsed columns. Drops rows with missing
-    tag_years or changed, and rows with tag_years <= 1e-6.
+    Per turnover-model-methodology.md §1.2, the per-row Bernoulli-on-Poisson
+    likelihood requires Δ = t_k − t_{k−1} (inter-observation), so the default
+    ``t1_col`` is ``last_obs_timestamp``. Multiplying per-row Bernoullis
+    telescopes to the correct individual likelihood. The previous default of
+    ``last_tag_timestamp`` would have made Δ the duration since the
+    individual's start — correct for one-row-per-individual but biased
+    downward on multi-version POIs.
+
+    Also emits ``is_first_interval`` — True exactly when
+    ``last_obs_timestamp == last_tag_timestamp``, i.e. this row is the first
+    surviving observation of its ``(POI, name-iteration)`` individual. Used
+    by the ZIE δ extension (methodology §1.7).
 
     Args:
         data: Observations DataFrame as returned by format_observations.
@@ -54,14 +37,16 @@ def prepare_data_for_model(
             kept.
         min_value_count: If provided, groups with fewer than this many
             observations are dropped.
-        t1_col: Name of the start-time timestamp column.
+        t1_col: Name of the start-time timestamp column. Default
+            ``last_obs_timestamp`` gives the inter-observation interval.
         t2_col: Name of the end-time timestamp column.
 
     Returns:
-        Filtered DataFrame with additional tag_days and tag_years columns.
+        Filtered DataFrame with additional ``tag_days``, ``tag_years``, and
+        ``is_first_interval`` columns.
 
     Raises:
-        ValueError: If t1_col or t2_col are not present in data.
+        ValueError: If ``t1_col`` or ``t2_col`` is not present in data.
     """
     if group_key is not None:
         keep_ids = data.dropna(subset = [group_key]).id.unique().tolist()  # noqa: F841
@@ -80,13 +65,21 @@ def prepare_data_for_model(
         )
         data = data.query(f'{group_key} in @groups_over_threshold')
     # Prepare timestamps
-    if any(col not in data.columns for col in [t1_col, t2_col]):
-        raise ValueError("Timestamp columns are missing from the data.")
-    for timestamp_col in [t1_col, t2_col]:
+    required_cols = [t1_col, t2_col, 'last_obs_timestamp', 'last_tag_timestamp']
+    if any(col not in data.columns for col in required_cols):
+        raise ValueError(
+            f"Required timestamp columns missing. Expected: {required_cols}"
+        )
+    data = data.copy()
+    for timestamp_col in set(required_cols):
         data[timestamp_col] = pd.to_datetime(data[timestamp_col])
+    tag_days = (data[t2_col] - data[t1_col]).dt.days
     data = data.assign(
-        tag_days = (pd.col(t2_col) - pd.col(t1_col)).dt.days,
-        tag_years = pd.col('tag_days') / 365,
+        tag_days = tag_days,
+        tag_years = tag_days / 365,
+        is_first_interval = (
+            data['last_obs_timestamp'] == data['last_tag_timestamp']
+        ),
     )
     data = (
         data

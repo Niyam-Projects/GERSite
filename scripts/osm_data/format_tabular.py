@@ -1,24 +1,30 @@
 """
-Reformat raw OSM version histories into modelling-ready observations.
+Reformat raw OSM version histories into modelling-ready observations, tagged
+with a shared taxonomy label.
 
 Reads osm_versions.parquet and osm_changes.parquet (produced by either
 osm_data/download_history.py for US+PR or osm_data/download.py for a
-Seattle-scoped Overpass run), then converts them into an observation-per-version
-format suitable for the change-rate model. Each observation records the tag
-value, the timestamps of the previous tag assignment and the current
-observation, and a flag for whether the tag changed.
+Seattle-scoped Overpass run). DuckDB streams them into an observation-per-
+version intermediate via ``format_observations_duckdb``. Each observation
+records the value of ``osm_data.tag_key`` (the change event — the tag whose
+add/change/delete fires ``changed=1``), timestamps of the previous tag
+assignment and the current observation, and the current values of every
+``download.osm.filter_keys`` tag.
 
-At US scale the versions + changes Parquets together exceed typical RAM, so
-this script uses ``format_observations_duckdb`` to pivot changes wide, LEFT
-JOIN them against versions, and ORDER BY (type, id, version) inside DuckDB,
-spilling the sort to disk as needed. A Python scan then runs the per-POI
-state machine over the sorted row stream and writes observations directly to
-the output CSV — peak RSS stays bounded to roughly ``DUCKDB_MEMORY_LIMIT``.
+After DuckDB finishes, this script assigns zero or more ``shared_label``
+values to each row using the conflation taxonomy crosswalk and explodes the
+table so that a POI version contributing to multiple taxonomy categories
+produces one row per category. Rows with no matching taxonomy category are
+dropped. Wildcard ``key=*`` labels are only applied when no specific
+crosswalk match fires anywhere on the row (see
+``assign_osm_shared_label(..., return_all=True)`` for details).
 
 Config keys used (config.yaml):
     directories.osm_data          — directory containing input and output files
-    download.osm.filter_keys      — all tag keys collected (passed as keep_keys)
-    osm_data.tag_key              — single tag key to model (e.g. "amenity")
+    download.osm.filter_keys      — all tag keys collected (passed as keep_keys
+                                    AND used by the taxonomy assignment)
+    osm_data.tag_key              — single tag key whose changes define
+                                    observation events (e.g. "name")
 
 Prerequisites:
     Run osm_data/download_history.py (US+PR, PBF-based) or osm_data/download.py
@@ -26,13 +32,19 @@ Prerequisites:
     osm_changes.parquet.
 
 Output file (in osm_data directory):
-    osm_observations_{tag_key}.csv — one row per version observation with columns:
+    osm_observations.parquet — one row per (POI version, shared_label). Columns:
         id, version, tag_key, last_tag_timestamp, obs_timestamp, changed,
-        plus all keep_keys columns for grouping
+        shared_label, plus every filter_keys column for reference.
 """
 
+import pandas as pd
 from config_versioned import Config
 
+from openpois.conflation.taxonomy import (
+    assign_osm_shared_label,
+    load_match_radii,
+    load_osm_crosswalk,
+)
 from openpois.osm.format_observations import format_observations_duckdb
 
 
@@ -48,7 +60,7 @@ TAG_KEY = config.get("osm_data", "tag_key")
 
 CHANGES_PATH = config.get_file_path("osm_data", "osm_changes")
 VERSIONS_PATH = config.get_file_path("osm_data", "osm_versions")
-OUT_PATH = SAVE_DIR / f"osm_observations_{TAG_KEY}.csv"
+OUT_PATH = config.get_file_path("osm_data", "osm_observations")
 
 # DuckDB execution limits. The sort operator spills past memory_limit so this
 # caps peak RAM independent of input size. Threads default to os.cpu_count()
@@ -71,4 +83,31 @@ if __name__ == "__main__":
         duckdb_memory_limit = DUCKDB_MEMORY_LIMIT,
         duckdb_threads = DUCKDB_THREADS,
     )
-    print(f"Saved {n_written} observations to {OUT_PATH}")
+    print(f"DuckDB wrote {n_written:,} raw observations to {OUT_PATH}")
+
+    print("Loading raw observations for shared-label assignment ...")
+    obs_df = pd.read_parquet(OUT_PATH)
+
+    print("Assigning shared taxonomy labels (multi-label, exploded) ...")
+    labels_per_row, _ = assign_osm_shared_label(
+        obs_df,
+        load_osm_crosswalk(),
+        load_match_radii(),
+        OSM_KEYS,
+        return_all = True,
+    )
+    obs_df["shared_label"] = labels_per_row
+    n_before_explode = len(obs_df)
+    obs_df = obs_df.explode("shared_label", ignore_index = True)
+    obs_df = obs_df.dropna(subset = ["shared_label"])
+    obs_df = obs_df[obs_df["shared_label"] != ""]
+
+    print(
+        f"Exploded {n_before_explode:,} raw rows to "
+        f"{len(obs_df):,} (POI, shared_label) rows"
+    )
+    print("Top shared labels by row count:")
+    print(obs_df["shared_label"].value_counts().head(15).to_string())
+
+    obs_df.to_parquet(OUT_PATH, index = False)
+    print(f"Saved {len(obs_df):,} observations to {OUT_PATH}")

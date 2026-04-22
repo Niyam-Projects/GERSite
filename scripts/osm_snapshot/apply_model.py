@@ -2,24 +2,28 @@
 """
 Apply OSM change-rate model predictions to the OSM POI snapshot.
 
-Reads fitted model predictions for all versions that start with the configured
-`model_stub`, then assigns a confidence estimate to every POI in the OSM
-snapshot based on:
-  1. Best-matching model group (by filter key priority order)
-  2. Years since the element was last edited in OSM
+Loads a single unified random-effects model grouped by shared taxonomy
+label (``{model_stub}_by_shared_label``) plus a constant-model fallback
+(``{model_stub}_constant``). For each POI:
 
-Matching priority (first match wins):
-  - For each key in `download > osm > filter_keys`, if a `<model_stub>_by_<key>`
-    prediction set exists and the POI's value for that key appears in the
-    predictions' group_name column, use those group-specific estimates.
-  - If no filter key matches, fall back to `<model_stub>_constant`.
+  1. Assign a shared taxonomy label using
+     ``openpois.conflation.taxonomy.assign_osm_shared_label`` (single-label
+     mode — first-match-wins across filter_keys, per-key wildcard
+     fallback) — the same label the conflation pipeline uses.
+  2. If the shared-label model exists and the assigned label is present
+     in its predictions, use the group-specific estimate.
+  3. Otherwise, fall back to the constant model.
+
+Confidence is derived from (1 - p_change) at the number of years since the
+element was last edited, rounded to 0.1 and capped at 10.
 
 Output columns added to the snapshot:
   conf_mean, conf_lower, conf_upper  — confidence (1 - p_change) estimates
   t2_years                           — years since last OSM edit (rounded to
                                        0.1, capped at 10)
   model_version                      — which model version was used
-  model_group                        — which group was matched, or "constant"
+  model_group                        — the assigned shared label, or
+                                       "constant" for the fallback
 
 Streams input row-groups via pyarrow, computes predictions per batch in numpy,
 and appends the new columns before writing each batch to the output parquet.
@@ -37,6 +41,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from config_versioned import Config
 
+from openpois.conflation.taxonomy import (
+    assign_osm_shared_label,
+    load_match_radii,
+    load_osm_crosswalk,
+)
 from openpois.models.apply import (
     PREDICTIONS_FILE,
     constant_lookup,
@@ -59,6 +68,8 @@ OUTPUT_PATH = config.get_file_path("snapshot_osm", "rated_snapshot")
 # Base directory containing all versioned model subdirectories
 MODEL_BASE = Path(config.get_dir_path("model_output")).parent
 
+SHARED_LABEL_VERSION = f"{MODEL_STUB}_by_shared_label"
+
 BATCH_ROWS = 500_000
 ROW_GROUP_SIZE = 50_000
 
@@ -70,14 +81,16 @@ ROW_GROUP_SIZE = 50_000
 def _compute_batch_predictions(
     df_lookup: pd.DataFrame,
     const_arr: np.ndarray,
-    by_key_lookups: dict[str, tuple[list[str], np.ndarray]],
+    shared_label_lookup: tuple[list[str], np.ndarray] | None,
+    osm_crosswalk: pd.DataFrame,
+    match_radii: pd.DataFrame,
     constant_version: str,
 ) -> tuple[dict[str, np.ndarray], np.ndarray]:
     """
-    Given only the `last_edited` + `FILTER_KEYS` columns of a batch, compute
-    the 6 prediction columns plus a boolean `matched` mask (True where a
-    per-key random-effects model was used, False where the constant fallback
-    applied). Mirrors the logic of the original in-memory implementation.
+    Given the ``last_edited`` + ``FILTER_KEYS`` columns of a batch, compute
+    the 6 prediction columns plus a boolean ``matched`` mask (True where the
+    shared-label random-effects model was used, False where the constant
+    fallback applied).
     """
     n = len(df_lookup)
     today = pd.Timestamp.now(tz = "UTC")
@@ -100,22 +113,27 @@ def _compute_batch_predictions(
     model_group_arr = np.full(n, "constant", dtype = object)
     matched = np.zeros(n, dtype = bool)
 
-    for key in FILTER_KEYS:
-        if key not in by_key_lookups:
-            continue
-        groups, group_arr = by_key_lookups[key]
+    if shared_label_lookup is not None:
+        groups, group_arr = shared_label_lookup
         group_to_idx = {g: i for i, g in enumerate(groups)}
-        group_ids = (
-            df_lookup[key].map(group_to_idx).fillna(-1).astype(int).to_numpy()
+
+        shared_labels, _ = assign_osm_shared_label(
+            df_lookup, osm_crosswalk, match_radii, FILTER_KEYS,
         )
-        eligible = ~matched & (group_ids >= 0)
+        # shared_labels is an object ndarray of str; empty string == no match.
+        group_ids = np.array(
+            [group_to_idx.get(lb, -1) for lb in shared_labels],
+            dtype = int,
+        )
+        eligible = group_ids >= 0
         eli_pos = np.where(eligible)[0]
-        if len(eli_pos) == 0:
-            continue
-        p_arr[eli_pos] = group_arr[group_ids[eli_pos], t2_int_arr[eli_pos]]
-        model_version_arr[eli_pos] = f"{MODEL_STUB}_by_{key}"
-        model_group_arr[eli_pos] = df_lookup[key].to_numpy()[eli_pos]
-        matched[eli_pos] = True
+        if len(eli_pos):
+            p_arr[eli_pos] = group_arr[
+                group_ids[eli_pos], t2_int_arr[eli_pos]
+            ]
+            model_version_arr[eli_pos] = SHARED_LABEL_VERSION
+            model_group_arr[eli_pos] = np.asarray(shared_labels)[eli_pos]
+            matched[eli_pos] = True
 
     return (
         {
@@ -158,16 +176,25 @@ if __name__ == "__main__":
     const_arr = constant_lookup(load_predictions(constant_dir))
     print(f"Loaded constant model from {constant_dir.name}")
 
-    by_key_lookups: dict[str, tuple[list[str], np.ndarray]] = {}
-    for key in FILTER_KEYS:
-        version = f"{MODEL_STUB}_by_{key}"
-        version_dir = MODEL_BASE / version
-        if version_dir.is_dir() and (version_dir / PREDICTIONS_FILE).exists():
-            groups, arr = group_lookup(load_predictions(version_dir))
-            by_key_lookups[key] = (groups, arr)
-            print(f"  Loaded {version} ({len(groups)} groups)")
-        else:
-            print(f"  No predictions found for {version}; will skip")
+    shared_label_dir = MODEL_BASE / SHARED_LABEL_VERSION
+    if (
+        shared_label_dir.is_dir()
+        and (shared_label_dir / PREDICTIONS_FILE).exists()
+    ):
+        shared_label_lookup = group_lookup(load_predictions(shared_label_dir))
+        print(
+            f"  Loaded {SHARED_LABEL_VERSION} "
+            f"({len(shared_label_lookup[0])} groups)"
+        )
+    else:
+        shared_label_lookup = None
+        print(
+            f"  No predictions found for {SHARED_LABEL_VERSION}; "
+            "using constant model only"
+        )
+
+    osm_crosswalk = load_osm_crosswalk()
+    match_radii = load_match_radii()
 
     # -- Open input, build output schema ----------------------------------------
     print(f"\nReading OSM snapshot from {SNAPSHOT_PATH} ...")
@@ -193,11 +220,16 @@ if __name__ == "__main__":
     )
 
     # -- Stream: read batch → append prediction columns → write -----------------
-    lookup_cols = ["last_edited"] + [k for k in FILTER_KEYS if k in by_key_lookups]
+    # Need last_edited + all FILTER_KEYS columns that are present, so
+    # assign_osm_shared_label can pick from any of them.
+    batch_schema_cols = set(input_schema.names)
+    lookup_cols = ["last_edited"] + [
+        k for k in FILTER_KEYS if k in batch_schema_cols
+    ]
     version_counts: dict[str, int] = {
-        f"{MODEL_STUB}_by_{k}": 0 for k in by_key_lookups
+        SHARED_LABEL_VERSION: 0,
+        constant_version: 0,
     }
-    version_counts[constant_version] = 0
     n_written = 0
 
     OUTPUT_PATH.parent.mkdir(parents = True, exist_ok = True)
@@ -216,14 +248,15 @@ if __name__ == "__main__":
             tbl = pa.Table.from_batches([batch])
             df_lookup = tbl.select(lookup_cols).to_pandas()
             preds, matched = _compute_batch_predictions(
-                df_lookup, const_arr, by_key_lookups, constant_version,
+                df_lookup,
+                const_arr,
+                shared_label_lookup,
+                osm_crosswalk,
+                match_radii,
+                constant_version,
             )
 
-            for key in by_key_lookups:
-                version = f"{MODEL_STUB}_by_{key}"
-                version_counts[version] += int(
-                    (preds["model_version"] == version).sum()
-                )
+            version_counts[SHARED_LABEL_VERSION] += int(matched.sum())
             version_counts[constant_version] += int(len(df_lookup) - matched.sum())
 
             for field in new_fields:

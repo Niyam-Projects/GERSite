@@ -166,9 +166,10 @@ def change_plot_create(
         )
         fig = fig + gg.geom_ribbon(
             data = p_renamed,
-            fill = 'red', alpha = 0.25, linetype = 'dashed', color = '#444444'
+            fill = 'darkred', alpha = 0.25, linetype = 'dashed',
+            color = 'darkred',
         ) + gg.geom_line(
-            data = p_renamed, color = '#444444',
+            data = p_renamed, color = 'darkred',
             mapping = gg.aes(x = 'year', y = 'y')
         )
     return fig

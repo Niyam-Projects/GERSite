@@ -8,12 +8,13 @@ This module formats OSM changes and versions into observations, which can be mor
 queried and statistically analyzed.
 """
 
-import csv
 import os
 import re
 from pathlib import Path
 
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 _SAFE_KEY_RE = re.compile(r"^[A-Za-z0-9_:]+$")
@@ -143,22 +144,23 @@ def format_observations_duckdb(
     verbose: bool = True,
 ) -> int:
     """
-    Stream POI observations from Parquet inputs to CSV via DuckDB.
+    Stream POI observations from Parquet inputs to Parquet via DuckDB.
 
     DuckDB pivots the long-form ``osm_changes.parquet`` wide by tag key,
     LEFT-joins ``osm_versions.parquet`` on ``(type, id, version)``, and
     returns rows sorted by ``(type, id, version)``; the sort spills to
     ``duckdb_temp_dir`` past ``duckdb_memory_limit``. A Python scan then
     iterates the sorted stream through :func:`_advance_scan_state`,
-    writing each observation directly to CSV.
+    buffering emitted observations per DuckDB fetch batch and flushing
+    them as ``pyarrow.Table`` record batches to a ``ParquetWriter``.
 
-    Peak RSS is bounded to roughly ``duckdb_memory_limit`` plus the
-    DictWriter buffer, regardless of input size.
+    Peak RSS is bounded to roughly ``duckdb_memory_limit`` plus one
+    fetch batch of observations, regardless of input size.
 
     Args:
         changes_path: Input ``osm_changes.parquet``.
         versions_path: Input ``osm_versions.parquet``.
-        output_path: Destination CSV. Overwritten.
+        output_path: Destination ``.parquet``. Overwritten.
         tag_key: Tag key to model (e.g. ``"name"``).
         keep_keys: Tag keys to retain on each observation. Must not
             include special characters (validated against
@@ -169,7 +171,8 @@ def format_observations_duckdb(
             ``os.cpu_count()``.
         duckdb_temp_dir: Sort-spill directory. Defaults to
             ``output_path.parent``.
-        batch_rows: Rows pulled per ``fetchmany`` call.
+        batch_rows: Rows pulled per ``fetchmany`` call; also the
+            ParquetWriter flush size.
         verbose: Print progress.
 
     Returns:
@@ -229,16 +232,26 @@ def format_observations_duckdb(
         col_idx[f"{k}__value"] = len(col_idx)
         col_idx[f"{k}__change"] = len(col_idx)
 
-    fieldnames = (
-        [
-            "id", "version", "changeset", "obs_timestamp", "last_obs_timestamp",
-            "last_tag_timestamp", "user", "last_tag_user",
-            "tag_value", "last_tag_value", "changed", "deleted",
-        ]
-        + keep_keys
-        + [f"{k}_last_value" for k in keep_keys]
-        + ["tag_key"]
-    )
+    schema_fields = [
+        ("id", pa.int64()),
+        ("version", pa.int64()),
+        ("changeset", pa.int64()),
+        ("obs_timestamp", pa.string()),
+        ("last_obs_timestamp", pa.string()),
+        ("last_tag_timestamp", pa.string()),
+        ("user", pa.string()),
+        ("last_tag_user", pa.string()),
+        ("tag_value", pa.string()),
+        ("last_tag_value", pa.string()),
+        ("changed", pa.int8()),
+        ("deleted", pa.int8()),
+    ]
+    for k in keep_keys:
+        schema_fields.append((k, pa.string()))
+    for k in keep_keys:
+        schema_fields.append((f"{k}_last_value", pa.string()))
+    schema_fields.append(("tag_key", pa.string()))
+    schema = pa.schema(schema_fields)
 
     con = duckdb.connect()
     try:
@@ -254,12 +267,8 @@ def format_observations_duckdb(
         cursor = con.execute(sql)
 
         total = 0
-        with open(output_path, "w", newline = "") as f:
-            writer = csv.DictWriter(
-                f, fieldnames = fieldnames, extrasaction = "ignore"
-            )
-            writer.writeheader()
-
+        buffer: list[dict] = []
+        with pq.ParquetWriter(output_path, schema, compression = "zstd") as writer:
             current_poi = None
             state = None
             while True:
@@ -275,8 +284,14 @@ def format_observations_duckdb(
                         state, row, col_idx, tag_key, keep_keys
                     )
                     if obs is not None:
-                        writer.writerow(obs)
+                        buffer.append(obs)
                         total += 1
+                if buffer:
+                    writer.write_table(pa.Table.from_pylist(buffer, schema = schema))
+                    buffer.clear()
+            if buffer:
+                writer.write_table(pa.Table.from_pylist(buffer, schema = schema))
+                buffer.clear()
     finally:
         con.close()
 

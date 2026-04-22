@@ -136,15 +136,13 @@ AWS credentials via environment variables or ``~/.aws/credentials``.
 models
 ------
 
-openpois.models.event_rate
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+openpois.models.jax_core
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-Representation of a Poisson event rate (λ) used by the change-rate model.
-Wraps a constant or time-varying λ tensor and computes the probability that
-at least one change event occurs within a given time interval via numerical
-or closed-form integration.
+JAX/BlackJAX helpers: a PRNG factory, a jitted Markov-chain scan, a NUTS
+sampler with window adaptation, and a vmap-based predictive-draw utility.
 
-.. automodule:: openpois.models.event_rate
+.. automodule:: openpois.models.jax_core
    :members:
    :undoc-members:
    :show-inheritance:
@@ -152,12 +150,24 @@ or closed-form integration.
 openpois.models.model_fitter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-L-BFGS optimizer wrapper for POI change-rate models. Fits model parameters
-using PyTorch and the ``torchmin`` optimizer, generates posterior parameter
-draws for uncertainty quantification, and produces prediction tables of
-change probability versus time.
+BlackJAX NUTS fitter for POI change-rate models. Takes an ``event_rate_fun``
+plus starting parameters as a pytree, runs window-adapted NUTS to draw from
+the posterior, and produces posterior summaries and predictive distributions
+of change probability versus time.
 
 .. automodule:: openpois.models.model_fitter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openpois.models.osm_models
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+JAX model classes for OSM turnover. ``ConstantModel`` and
+``RandomByTypeModel`` package their own data, priors, and event-rate
+functions to hand to ``ModelFitter``. Selectable via ``get_model_class``.
+
+.. automodule:: openpois.models.osm_models
    :members:
    :undoc-members:
    :show-inheritance:
@@ -165,9 +175,9 @@ change probability versus time.
 openpois.models.setup
 ~~~~~~~~~~~~~~~~~~~~~
 
-Environment setup utilities for PyTorch model runs. Selects GPU or CPU
-device, configures ``torch_continuum`` optimisation level, and prepares
-filtered and grouped observation data for model fitting.
+Data-preparation helpers. ``prepare_data_for_model`` filters and groups
+observation records and computes the ``tag_years`` elapsed column used as
+the per-observation interval length in fitting.
 
 .. automodule:: openpois.models.setup
    :members:

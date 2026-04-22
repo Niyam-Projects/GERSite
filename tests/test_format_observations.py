@@ -92,7 +92,7 @@ class TestFormatObservationsDuckdb:
     def test_synthetic_inputs_produce_expected_rows(self, tmp_path):
         versions, changes = _synthetic_inputs()
         v_path, c_path = _write_parquets(tmp_path, versions, changes)
-        out_path = tmp_path / "obs.csv"
+        out_path = tmp_path / "obs.parquet"
         total = format_observations_duckdb(
             changes_path = c_path,
             versions_path = v_path,
@@ -103,7 +103,7 @@ class TestFormatObservationsDuckdb:
         )
         # Two observations per POI (Added + Changed), three POIs
         assert total == 6
-        out = pd.read_csv(out_path)
+        out = pd.read_parquet(out_path)
         assert len(out) == 6
         assert set(out["id"]) == {100, 200, 300}
         assert set(out["version"]) == {1, 2}
@@ -156,7 +156,7 @@ class TestFormatObservationsDuckdb:
                     "id": 42, "version": ver, "type": "node",
                 })
         v_path, c_path = _write_parquets(tmp_path, versions, changes)
-        out_path = tmp_path / "obs.csv"
+        out_path = tmp_path / "obs.parquet"
         format_observations_duckdb(
             changes_path = c_path,
             versions_path = v_path,
@@ -165,7 +165,7 @@ class TestFormatObservationsDuckdb:
             keep_keys = [],
             verbose = False,
         )
-        out = pd.read_csv(out_path).sort_values("version").reset_index(drop = True)
+        out = pd.read_parquet(out_path).sort_values("version").reset_index(drop = True)
         assert list(out["version"]) == [1, 2, 3, 4]
         assert list(out["tag_value"].fillna("")) == ["foo", "bar", "", "bar"]
         assert list(out["changed"]) == [1, 1, 1, 1]
@@ -195,7 +195,7 @@ class TestFormatObservationsDuckdb:
                     "id": 7, "version": ver, "type": "node",
                 })
         v_path, c_path = _write_parquets(tmp_path, versions, changes)
-        out_path = tmp_path / "obs.csv"
+        out_path = tmp_path / "obs.parquet"
         format_observations_duckdb(
             changes_path = c_path,
             versions_path = v_path,
@@ -204,7 +204,7 @@ class TestFormatObservationsDuckdb:
             keep_keys = ["amenity"],
             verbose = False,
         )
-        out = pd.read_csv(out_path).sort_values("version").reset_index(drop = True)
+        out = pd.read_parquet(out_path).sort_values("version").reset_index(drop = True)
         amenities = list(out["amenity"].fillna(""))
         lasts = list(out["amenity_last_value"].fillna(""))
         assert amenities == ["restaurant", "restaurant", "bar"]
@@ -232,7 +232,7 @@ class TestFormatObservationsDuckdb:
             "id": 99, "version": 1, "type": "node",
         })
         v_path, c_path = _write_parquets(tmp_path, versions, changes)
-        out_path = tmp_path / "obs.csv"
+        out_path = tmp_path / "obs.parquet"
         total = format_observations_duckdb(
             changes_path = c_path,
             versions_path = v_path,
@@ -242,7 +242,7 @@ class TestFormatObservationsDuckdb:
             verbose = False,
         )
         assert total == 3
-        out = pd.read_csv(out_path).sort_values("version").reset_index(drop = True)
+        out = pd.read_parquet(out_path).sort_values("version").reset_index(drop = True)
         assert list(out["tag_value"].fillna("")) == ["cafe", "cafe", "cafe"]
         assert list(out["amenity"].fillna("")) == ["cafe", "cafe", "cafe"]
         assert list(out["changed"]) == [1, 0, 0]
