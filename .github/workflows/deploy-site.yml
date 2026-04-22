@@ -31,12 +31,6 @@ jobs:
         run: npm ci
         working-directory: site
 
-      - name: Copy DuckDB WASM files to public
-        run: |
-          cp node_modules/@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js public/
-          cp node_modules/@duckdb/duckdb-wasm/dist/duckdb-eh.wasm public/
-        working-directory: site
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
