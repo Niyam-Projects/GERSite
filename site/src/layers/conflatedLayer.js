@@ -70,6 +70,8 @@ export function wrapConflatedFeature(rf) {
     _source: 'conflated',
     unified_id: rf.get('unified_id'),
     source: rf.get('source'),
+    osm_id: rf.get('osm_id'),
+    osm_type: rf.get('osm_type'),
     shared_label: rf.get('shared_label'),
     name: rf.get('name'),
     brand: rf.get('brand'),

@@ -195,7 +195,7 @@
         <a
           v-if="entry.osm_id"
           class="osm-link"
-          :href="`https://www.openstreetmap.org/node/${cleanOsmId(entry.osm_id)}`"
+          :href="`https://www.openstreetmap.org/${entry.osm_type || 'node'}/${cleanOsmId(entry.osm_id)}`"
           target="_blank"
           rel="noopener"
         >

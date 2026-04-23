@@ -75,6 +75,7 @@ export function wrapOsmFeature(rf) {
   const props = {
     _source: 'osm',
     osm_id: rf.get('osm_id'),
+    osm_type: rf.get('osm_type'),
     name: rf.get('name'),
     conf_mean: rf.get('conf_mean'),
     source_dataset: 'OpenStreetMap',

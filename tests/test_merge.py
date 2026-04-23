@@ -21,6 +21,7 @@ def osm_gdf():
     return gpd.GeoDataFrame(
         {
             "osm_id": [100, 200, 300],
+            "osm_type": ["node", "way", "relation"],
             "name": ["Coffee Shop", "Grocery Store", "Park"],
             "brand": ["Starbucks", None, None],
             "conf_mean": [0.8, 0.6, 0.9],
@@ -171,6 +172,7 @@ class TestMergeMatchedPois:
         osm = gpd.GeoDataFrame(
             {
                 "osm_id": [1],
+                "osm_type": ["way"],
                 "name": ["Park"],
                 "brand": [None],
                 "conf_mean": [0.9],
@@ -219,7 +221,8 @@ class TestMergeMatchedPois:
             osm_labels, ov_labels,
         )
         expected_cols = {
-            "unified_id", "source", "osm_id", "overture_id",
+            "unified_id", "source", "osm_id", "osm_type",
+            "overture_id",
             "name", "brand", "shared_label",
             "conf_mean", "conf_lower", "conf_upper",
             "match_score", "match_distance_m",
@@ -251,6 +254,30 @@ class TestMergeMatchedPois:
             result["shared_label"] == "Park"
         ].iloc[0]
         assert park_row["shared_label"] == "Park"
+
+    def test_osm_type_propagation(
+        self, osm_gdf, overture_gdf, matches,
+    ):
+        """osm_type must flow through matched + unmatched-OSM rows and
+        be null on unmatched-Overture rows so the frontend can route
+        OpenStreetMap links to /node/, /way/, or /relation/ correctly.
+        """
+        osm_labels = np.array(["Cafe", "Supermarket", "Park"])
+        ov_labels = np.array(["Cafe", "Supermarket", "Park"])
+        result = merge_matched_pois(
+            osm_gdf, overture_gdf, matches,
+            osm_labels, ov_labels,
+        )
+        # Matched row (osm_idx=0 → node)
+        matched = result[result["source"] == "matched"].iloc[0]
+        assert matched["osm_type"] == "node"
+        # Unmatched-OSM rows (idx 1,2 → way, relation)
+        osm_only = result[result["source"] == "osm"].set_index("osm_id")
+        assert osm_only.loc[200, "osm_type"] == "way"
+        assert osm_only.loc[300, "osm_type"] == "relation"
+        # Unmatched-Overture rows carry no osm_type
+        ov_only = result[result["source"] == "overture"]
+        assert ov_only["osm_type"].isna().all()
 
 
 # -----------------------------------------------------------------

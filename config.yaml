@@ -277,6 +277,7 @@ upload:
     conflated_layer_name: "conflated_pois"
     osm_properties:
       - osm_id
+      - osm_type       # node|way|relation — drives popup OSM link path
       - source
       - name
       - conf_mean      # drives confidence-based point coloring
@@ -292,6 +293,8 @@ upload:
     conflated_properties:
       - unified_id
       - source
+      - osm_id
+      - osm_type       # node|way|relation — drives popup OSM link path
       - shared_label
       - conf_mean
       - name

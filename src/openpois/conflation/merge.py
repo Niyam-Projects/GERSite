@@ -116,6 +116,7 @@ def _build_matched_gdf(
     geoms = _pick_geometries(osm_geoms, ov_geoms)
 
     osm_ids = osm_gdf["osm_id"].to_numpy()[oi]
+    osm_types = osm_gdf["osm_type"].to_numpy()[oi]
     ov_ids = overture_gdf["overture_id"].to_numpy()[vi]
 
     unified_ids = np.array(
@@ -131,6 +132,7 @@ def _build_matched_gdf(
             "unified_id": unified_ids,
             "source": "matched",
             "osm_id": osm_ids,
+            "osm_type": osm_types,
             "overture_id": ov_ids,
             "name": names,
             "brand": brands,
@@ -166,6 +168,7 @@ def _build_unmatched_osm_gdf(
     n = len(idx)
 
     osm_ids = osm_gdf["osm_id"].to_numpy()[idx]
+    osm_types = osm_gdf["osm_type"].to_numpy()[idx]
     names = osm_gdf["name"].to_numpy()[idx]
     brand_arr = (
         osm_gdf["brand"].to_numpy()[idx]
@@ -186,6 +189,7 @@ def _build_unmatched_osm_gdf(
             "unified_id": unified_ids,
             "source": "osm",
             "osm_id": osm_ids,
+            "osm_type": osm_types,
             "overture_id": np.full(n, None, dtype = object),
             "name": names,
             "brand": brand_arr,
@@ -241,6 +245,7 @@ def _build_unmatched_overture_gdf(
             "unified_id": unified_ids,
             "source": "overture",
             "osm_id": np.full(n, None, dtype = object),
+            "osm_type": np.full(n, None, dtype = object),
             "overture_id": ov_ids,
             "name": names,
             "brand": brand_arr,
