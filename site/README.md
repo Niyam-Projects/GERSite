@@ -15,13 +15,13 @@ is gitignored. Use the `sync-taxonomy` skill (or run `build_taxonomy.py`
 followed by `check_taxonomy_sync.py`) whenever the CSVs change. Only the
 display-label maps in `src/constants.js` are hand-maintained.
 
-### S3 snapshot URLs
+### PMTiles URLs
 
-When a new snapshot is uploaded to S3, update the date strings in two places:
+Public data is hosted on Source Cooperative. When a new version is
+published, bump the URLs in `src/constants.js`:
 
-- `src/constants.js` — `OSM_S3_BASE` and `CONFLATED_S3_BASE`
-- `public/about.html` — hardcoded S3 paths and browse links in the data
-  access section
+- `OSM_PMTILES_URL` and `CONFLATED_PMTILES_URL` — version folder matches
+  `versions.source_coop` in `config.yaml`
+- `OVERTURE_PMTILES_URL` — bump on each monthly Overture release
 
-OSM and conflated snapshots may have different dates, so update each URL
-individually.
+Each URL is independent; OSM and conflated versions may differ.

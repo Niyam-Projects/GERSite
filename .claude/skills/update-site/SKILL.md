@@ -23,9 +23,7 @@ Cooperative version folder.
    - `CONFLATED_PMTILES_URL` → `https://data.source.coop/henryspatialanalysis/openpois/<YYYY-MM-DD-vN>/conflated-pmtiles/conflated.pmtiles`
    - `OVERTURE_PMTILES_URL` → bump on monthly Overture release
 
-3. **Update hardcoded links in [site/public/about.html](../../../site/public/about.html)** — the data-access section embeds both a `source.coop` browse link and a `data.source.coop` path; both must match the new version folder.
-
-4. **Local preview**:
+3. **Local preview**:
    ```bash
    cd site && npm run dev
    ```
@@ -35,25 +33,24 @@ Cooperative version folder.
    - Taxonomy legend renders from `taxonomy.html`
    - POI popups show non-empty name/category/confidence
 
-5. **Production build**:
+4. **Production build**:
    ```bash
    npm run build
    ```
    Inspect `dist/` output; flag large chunk-size increases if dependencies changed.
 
-6. **Deploy** — per host's deployment mechanism (not scripted in-repo).
+5. **Deploy** — per host's deployment mechanism (not scripted in-repo).
 
-7. **Post-deploy check** — load the deployed site, open browser console, confirm no CORS or 404s on the new Source Coop URLs.
+6. **Post-deploy check** — load the deployed site, open browser console, confirm no CORS or 404s on the new Source Coop URLs.
 
 ## Commit convention
 
 Two separate commits, matching the recent history:
 - "Push to new data version" — `config.yaml` and publish-side changes
-- "Update to latest data version" — `site/src/constants.js` + `site/public/about.html`
+- "Update to latest data version" — `site/src/constants.js`
 
 ## Key files
 
 - [site/src/constants.js](../../../site/src/constants.js) — PMTiles URLs, color ramps, zoom thresholds, CONFLATED_LABELS
-- [site/public/about.html](../../../site/public/about.html) — hardcoded data-access links
 - [site/vite.config.js](../../../site/vite.config.js) — code-split chunks (ol, duckdb, arrow, etc.)
-- [site/README.md](../../../site/README.md) — maintenance notes on the two sync points
+- [site/README.md](../../../site/README.md) — maintenance notes on the PMTiles URLs
