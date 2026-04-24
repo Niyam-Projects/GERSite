@@ -92,19 +92,6 @@ from S3 if a specific date is not pinned.
    :undoc-members:
    :show-inheritance:
 
-openpois.io.foursquare
-~~~~~~~~~~~~~~~~~~~~~~
-
-Download a current US-wide Foursquare OS Places snapshot via the Foursquare
-Places Portal Apache Iceberg REST catalog. Authenticates with a portal token,
-loads US open venues filtered by L1 category, and resolves category names from
-the categories table. Requires the ``FSQ_PORTAL_TOKEN`` environment variable.
-
-.. automodule:: openpois.io.foursquare
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 openpois.io.geohash_partition
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

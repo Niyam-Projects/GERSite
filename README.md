@@ -11,7 +11,7 @@ make install_package  # Install openpois in editable mode
 
 ## POI Snapshot Downloads
 
-Three exploratory scripts download current US-wide POI snapshots from different sources. All output GeoParquet to `~/data/`.
+Two exploratory scripts download current US-wide POI snapshots from different sources. Both output GeoParquet to `~/data/`.
 
 ### OpenStreetMap
 
@@ -31,18 +31,7 @@ Queries the public Overture Maps S3 bucket directly via DuckDB. No authenticatio
 python exploratory/overture/download.py
 ```
 
-Output: `~/data/openpois/snapshots/overture/<VERSION>/overture_snapshot.parquet` (~7.2M POIs)
-
-### Foursquare OS Places
-
-Queries the Foursquare Places Portal Apache Iceberg catalog. Requires a free API token from [places.foursquare.com](https://places.foursquare.com).
-
-```bash
-export FSQ_PORTAL_TOKEN="<your_token>"
-python exploratory/foursquare/download.py
-```
-
-Output: `~/data/openpois/snapshots/foursquare/<VERSION>/foursquare_snapshot.parquet` (~8.3M POIs)
+Output: `~/data/openpois/snapshots/overture/<VERSION>/overture_snapshot.parquet` (~13M POIs)
 
 ### Configuration
 

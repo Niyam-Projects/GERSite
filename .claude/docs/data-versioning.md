@@ -10,7 +10,6 @@ versions:
   model_output: "20260416_by_leisure"  # fitted model artifacts (suffix indicates variant)
   snapshot_osm: "20260416"             # OSM current-state snapshot
   snapshot_overture: "20260417"        # Overture snapshot
-  snapshot_foursquare: "20260416"      # Foursquare snapshot
   aws: "20260416"                      # S3 prefix for uploaded data
   conflation: "20260417"               # conflated output
 ```
@@ -31,7 +30,7 @@ config.get_file_path("osm_data", "osm_versions")
 
 **Prefer `get_file_path` over composing `get_dir_path()` + `get()` manually.**
 
-`.get()` raises `ValueError` on null values — pass `fail_if_none=False` for optional fields like `download.overture.release_date: null` and `download.foursquare.release_date: null`.
+`.get()` raises `ValueError` on null values — pass `fail_if_none=False` for optional fields like `download.overture.release_date: null`.
 
 `config.write_self(section)` snapshots the effective config into the output directory — used by model and conflation scripts to record the state of a run.
 
@@ -39,7 +38,7 @@ config.get_file_path("osm_data", "osm_versions")
 
 - **Dates**: `YYYYMMDD`, e.g., `20260416`.
 - **Model variants**: `{date}_by_{group_key}` (e.g., `20260416_by_leisure`, `20260416_by_amenity`) or `{date}_constant`. See [skills/iterate-model-types](../skills/iterate-model-types/SKILL.md).
-- **Independent cadences**: snapshot versions can (and should) differ across sources — Overture releases ~monthly, Foursquare separately. Don't force them to match.
+- **Independent cadences**: snapshot versions can (and should) differ across sources — Overture releases ~monthly. Don't force them to match.
 
 ## External references (hand-update when bumping)
 
@@ -48,7 +47,7 @@ Version strings appear in these places outside `versions:` — grep before any c
 | File | References |
 |---|---|
 | [config.yaml](../../config.yaml) | `upload.latest_url_osm`, `upload.latest_url_conflation` (full URL with date) |
-| [site/src/constants.js](../../site/src/constants.js) | `OSM_S3_BASE`, `FSQ_S3_BASE`, `CONFLATED_S3_BASE` |
+| [site/src/constants.js](../../site/src/constants.js) | `OSM_S3_BASE`, `CONFLATED_S3_BASE` |
 | [site/public/about.html](../../site/public/about.html) | Hardcoded S3 browse links in the data-access section |
 | `osm_data.apply_model.model_stub` (config.yaml) | Which model family [scripts/osm_snapshot/apply_model.py](../../scripts/osm_snapshot/apply_model.py) ingests |
 

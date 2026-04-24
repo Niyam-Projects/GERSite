@@ -23,7 +23,6 @@ export const COLORS = {
   low: '#d73027',      // red, conf < 0.3
   medium: '#fee08b',   // yellow, conf 0.3-0.7
   high: '#1a9850',     // green, conf > 0.7
-  foursquare: '#3b82f6', // blue (deferred)
   cluster: '#6366f1',  // indigo for clusters
   geolocation: '#60a5fa', // light blue dot
 }
@@ -90,15 +89,6 @@ export const BASE_MAP_STYLES = [
 // "Other *" entries are sorted last; App.vue uses that convention to leave
 // them unchecked by default.
 export const CONFLATED_LABELS = SHARED_LABELS
-
-// Foursquare L1 categories
-export const FSQ_CATEGORIES = [
-  { key: 'Dining and Drinking', label: 'Dining & Drinking' },
-  { key: 'Retail', label: 'Retail' },
-  { key: 'Arts and Entertainment', label: 'Arts & Entertainment' },
-  { key: 'Sports and Recreation', label: 'Sports & Recreation' },
-  { key: 'Health and Medicine', label: 'Health & Medicine' },
-]
 
 // Zoom thresholds — PMTiles min_zoom (site can't zoom out below this).
 // Points above z14 are rendered via ol-pmtiles over-zoom.

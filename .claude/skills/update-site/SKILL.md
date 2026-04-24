@@ -9,7 +9,7 @@ Vue 3 + Vite frontend lives in [site/](../../../site/). After a data pull + uplo
 
 ## Prerequisites
 
-- New data published to S3 via [skills/conflate-snapshots](../conflate-snapshots/SKILL.md) (or the latest FSQ snapshot uploaded separately).
+- New data published to S3 via [skills/conflate-snapshots](../conflate-snapshots/SKILL.md).
 - Node + npm available (see `site/package.json` for engine requirements).
 
 ## Steps
@@ -18,7 +18,6 @@ Vue 3 + Vite frontend lives in [site/](../../../site/). After a data pull + uplo
 
 2. **Update S3 URLs in [site/src/constants.js](../../../site/src/constants.js)** — each source may have a different date:
    - `OSM_S3_BASE` → `snapshots/osm/YYYYMMDD/osm_snapshot_partitioned`
-   - `FSQ_S3_BASE` → `snapshots/foursquare/YYYYMMDD/foursquare_snapshot_partitioned`
    - `CONFLATED_S3_BASE` → `snapshots/conflated/YYYYMMDD/conflated_partitioned`
    - `OVERTURE_PMTILES_URL` → bump on monthly Overture release
 
@@ -30,7 +29,7 @@ Vue 3 + Vite frontend lives in [site/](../../../site/). After a data pull + uplo
    ```
    Verify:
    - Map loads POIs at zoom 14+ without CORS/404 errors
-   - Source filter dropdown (OSM / Overture / Foursquare / Conflated) toggles data
+   - Source filter dropdown (OSM / Overture / Conflated) toggles data
    - Taxonomy legend renders from `taxonomy.html`
    - POI popups show non-empty name/category/confidence
 

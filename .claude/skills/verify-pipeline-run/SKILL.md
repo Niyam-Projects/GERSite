@@ -7,12 +7,11 @@ description: Use when the user wants a QA/sanity check on a recently completed p
 
 Post-run QA runbook. Pick the subsection that matches what just ran.
 
-## Snapshots (OSM / Overture / Foursquare)
+## Snapshots (OSM / Overture)
 
 Baseline row counts (2026-04-17):
 - OSM: ~7.78M
 - Overture: ~13.05M (up from ~7.23M after widening `taxonomy_allowlist`; pre-2026-04-17 runs will be lower)
-- Foursquare: ~8.32M
 
 Check:
 ```python
@@ -21,7 +20,6 @@ pd.read_parquet(path).shape[0]
 ```
 
 Flag >5% drops. Known regression patterns:
-- **Foursquare**: PR alpha-2 code — filter must be `country IN ('US', 'PR')`, not `'US'` only.
 - **OSM**: PR is a *separate* PBF — confirm both `us-latest.osm.pbf` and `puerto-rico-latest.osm.pbf` got downloaded, filtered, and concat'd.
 - **Overture**: coarse-bbox pushdown + final DuckDB `ST_Within` — drop means the Aleutian antimeridian split was lost or the Census boundary failed to load. If the run crashed with "Information loss on integer cast", the DuckDB pin was bumped off 1.4.1 (see [docs/data-sources.md](../../docs/data-sources.md) → Overture Maps).
 
@@ -63,7 +61,7 @@ Confirm `conf_mean`, `conf_lower`, `conf_upper` columns are populated for every 
 
 - Open the deployed site (or `npm run dev` locally after a constants.js bump).
 - Browser console: no CORS, no 404s on S3 URLs.
-- Filter dropdown: each source (OSM / Overture / Foursquare / Conflated) loads.
+- Filter dropdown: each source (OSM / Overture / Conflated) loads.
 - Popups non-empty; taxonomy legend rendered; PMTiles overlay visible at zoom 14+.
 
 ## Recording issues

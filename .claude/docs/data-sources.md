@@ -44,26 +44,9 @@ Reference for every external data source openpois ingests. For the workflow that
   - Geometry is native DuckDB GEOMETRY — must `LOAD spatial;` and use `ST_X()` / `ST_Y()`.
 - **Upcoming migration (~June 2026)**: L0/L1 hierarchy → flat `basic_category`. Crosswalk CSV + `assign_overture_shared_label` will need updating.
 
-## Foursquare OS Places
-
-**Used by**: current-state Foursquare snapshot (`foursquare_snapshot.parquet`).
-
-- **Catalog**: `https://catalog.h3-hub.foursquare.com/iceberg` — PyIceberg `RestCatalog`.
-- **Auth**: `FSQ_PORTAL_TOKEN` env var.
-- **Params** (all in config.yaml):
-  - `warehouse="places"` (required)
-  - `namespace="datasets"`
-  - `places_table="places_os"`, `categories_table="categories_os"`
-- **Pipeline**: row filter `country IN ('US', 'PR') AND date_closed IS NULL` → PyIceberg scan → sjoin against exact US+PR polygon (PyIceberg has no spatial predicates).
-- **Entry**: [src/openpois/io/foursquare.py](../../src/openpois/io/foursquare.py).
-- **Quirks**:
-  - Table is **unpartitioned** (no `dt` column); release date inferred from `last_updated_at` in partition metadata.
-  - `fsq_category_ids` arrives as numpy/pyarrow array — use `len(x) == 0`, **not** `if not x:`.
-  - PR uses alpha-2 `'PR'`, not `'US'` — silent drop regression pre-2026-04-16 when filter was `'US'`-only.
-
 ## Census boundary
 
-**Used by**: all three snapshot downloaders (spatial clipping).
+**Used by**: both snapshot downloaders (spatial clipping).
 
 - **URL**: `download.general.boundary.source_url` → `https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_us_state_20m.zip` (1:20M cartographic, 50 states + DC + PR).
 - **Auth**: none.

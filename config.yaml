@@ -4,7 +4,6 @@ versions:
   model_output: "20260422_by_shared_label"
   snapshot_osm: "20260417"
   snapshot_overture: "20260423"
-  snapshot_foursquare: "20260416"
   aws: "20260423"
   conflation: "20260423"
 
@@ -103,20 +102,6 @@ download:
       - [community_and_government, public_safety_service]
       - [travel_and_transportation, fueling_station]
       - [travel_and_transportation, vehicle_service]
-  foursquare:
-    release_date: null  # null = auto-detect latest
-    catalog_uri: "https://catalog.h3-hub.foursquare.com/iceberg"
-    catalog_warehouse: "places"
-    catalog_namespace: "datasets"
-    places_table: "places_os"
-    categories_table: "categories_os"
-    token_env_var: "FSQ_PORTAL_TOKEN"
-    l1_category_names:
-      - "Dining and Drinking"
-      - "Retail"
-      - "Arts and Entertainment"
-      - "Sports and Recreation"
-      - "Health and Medicine"
 
 # Settings for OSM exploratory data analysis
 osm_data:
@@ -185,12 +170,6 @@ directories:
       predictions: predictions.csv
       diagnostics: diagnostics.csv
       inference_data: inference_data.nc
-  snapshot_foursquare:
-    versioned: true
-    path: ~/data/openpois/snapshots/foursquare
-    files:
-      snapshot: foursquare_snapshot.parquet
-      partitioned: foursquare_snapshot_partitioned
   snapshot_osm:
     versioned: true
     path: ~/data/openpois/snapshots/osm
@@ -226,7 +205,6 @@ directories:
     files:
       osm_snippet: osm_snippet.csv
       overture_snippet: overture_snippet.csv
-      foursquare_snippet: foursquare_snippet.csv
 
 # Settings for POI conflation
 conflation:

@@ -19,9 +19,9 @@ display-label maps in `src/constants.js` are hand-maintained.
 
 When a new snapshot is uploaded to S3, update the date strings in two places:
 
-- `src/constants.js` — `OSM_S3_BASE`, `FSQ_S3_BASE`, and `CONFLATED_S3_BASE`
+- `src/constants.js` — `OSM_S3_BASE` and `CONFLATED_S3_BASE`
 - `public/about.html` — hardcoded S3 paths and browse links in the data
   access section
 
-The OSM/Foursquare and conflated snapshots may have different dates (e.g.
-Foursquare `20260313`, OSM/conflated `20260416`), so update each URL individually.
+OSM and conflated snapshots may have different dates, so update each URL
+individually.

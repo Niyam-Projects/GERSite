@@ -1,21 +1,19 @@
 """
 Load the first few rows from each POI snapshot for quick schema inspection.
 
-Reads the first N_ROWS rows from each of the three GeoParquet snapshots
-(OSM, Overture, Foursquare) without loading the full files into memory, then
-writes the rows (minus geometry) to versioned snippet CSVs for fast reference.
-Useful for verifying column names and data types after a new download.
+Reads the first N_ROWS rows from each of the GeoParquet snapshots (OSM,
+Overture) without loading the full files into memory, then writes the rows
+(minus geometry) to versioned snippet CSVs for fast reference. Useful for
+verifying column names and data types after a new download.
 
 Config keys used (config.yaml):
     snapshot_osm.snapshot          — OSM GeoParquet path
     snapshot_overture.snapshot     — Overture GeoParquet path
-    snapshot_foursquare.snapshot   — Foursquare GeoParquet path
     directories.testing            — output directory for snippet CSVs
 
 Output files (in testing directory):
     osm_snippet.csv         — first N_ROWS rows of OSM snapshot (no geometry)
     overture_snippet.csv    — first N_ROWS rows of Overture snapshot (no geometry)
-    foursquare_snippet.csv  — first N_ROWS rows of Foursquare snapshot (no geometry)
 """
 
 import pyarrow as pa
@@ -31,7 +29,6 @@ config = Config("~/repos/openpois/config.yaml")
 
 OSM_PATH = config.get_file_path("snapshot_osm", "snapshot")
 OVERTURE_PATH = config.get_file_path("snapshot_overture", "snapshot")
-FOURSQUARE_PATH = config.get_file_path("snapshot_foursquare", "snapshot")
 
 N_ROWS = 100
 
@@ -78,10 +75,4 @@ if __name__ == "__main__":
     config.write(
         overture.drop(columns = "geometry"),
         'testing', 'overture_snippet'
-    )
-    foursquare = load_head(FOURSQUARE_PATH)
-    print(f"Columns: {list(foursquare.columns)}\n")
-    config.write(
-        foursquare.drop(columns = "geometry"),
-        'testing', 'foursquare_snippet'
     )

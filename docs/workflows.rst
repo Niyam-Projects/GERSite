@@ -15,7 +15,7 @@ exact config keys each script uses.
 Pipeline 1: POI Snapshot Downloads
 ------------------------------------
 
-These three scripts are independent and can be run in any order (or in
+These two scripts are independent and can be run in any order (or in
 parallel). Each downloads a current US-wide POI snapshot from one data
 source and saves it as a GeoParquet file.
 
@@ -38,21 +38,9 @@ See :mod:`openpois.io.osm_snapshot`.
    python scripts/overture/download.py
 
 Queries Overture Maps GeoParquet files on public S3 via DuckDB. No
-credentials required. Output: ``overture_snapshot.parquet`` (~7.2 M POIs).
+credentials required. Output: ``overture_snapshot.parquet`` (~13 M POIs).
 
 See :mod:`openpois.io.overture`.
-
-**Foursquare OS Places snapshot**
-
-.. code-block:: bash
-
-   python scripts/foursquare/download.py
-
-Authenticates to the Foursquare Places Portal Iceberg catalog (requires
-``FSQ_PORTAL_TOKEN`` env var). Output: ``foursquare_snapshot.parquet``
-(~8.3 M POIs).
-
-See :mod:`openpois.io.foursquare`.
 
 **Quick schema inspection** *(optional)*
 

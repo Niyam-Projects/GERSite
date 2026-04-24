@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "openpois"
 authors = [{ name = "Nathaniel Henry", email = "nat@henryspatialanalysis.com" }]
-description = "Open POI conflation between OpenStreetMap, Overture Maps, and FSQ"
+description = "Open POI conflation between OpenStreetMap and Overture Maps"
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
