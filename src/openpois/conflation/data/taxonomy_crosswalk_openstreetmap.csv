@@ -32,11 +32,11 @@ shop,shoes,Shoe Store
 shop,sports,Sports Outlet
 shop,storage_rental,Specialty Store
 shop,supermarket,Supermarket
+shop,wholesale,Supermarket
 shop,tobacco,Specialty Store
 shop,tires,Tire Store
 shop,tyres,Tire Store
 shop,variety_store,Discount Store
-shop,wholesale,Wholesale Store
 healthcare,alternative,Alternative Medicine
 healthcare,blood_donation,Other Healthcare
 healthcare,chiropractor,Other Healthcare
@@ -66,6 +66,7 @@ amenity,car_rental,Car Rental
 amenity,car_wash,Car Wash
 amenity,casino,Casino
 amenity,charging_station,Charging Station
+amenity,childcare,Childcare
 amenity,cinema,Movie Theater
 amenity,clinic,Clinic
 amenity,college,University

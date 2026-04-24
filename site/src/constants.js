@@ -9,10 +9,10 @@ import {
 
 // S3 URLs — PMTiles archives read via ol-pmtiles.
 export const OSM_PMTILES_URL =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260417/osm_snapshot.pmtiles'
+  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260423/osm_snapshot.pmtiles'
 
 export const CONFLATED_PMTILES_URL =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260422/conflated.pmtiles'
+  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260423/conflated.pmtiles'
 
 // Overture PMTiles (latest release — update URL on each Overture monthly release)
 export const OVERTURE_PMTILES_URL =

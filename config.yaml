@@ -3,10 +3,10 @@ versions:
   osm_data: "20260416"
   model_output: "20260422_by_shared_label"
   snapshot_osm: "20260417"
-  snapshot_overture: "20260417"
+  snapshot_overture: "20260423"
   snapshot_foursquare: "20260416"
-  aws: "20260422"
-  conflation: "20260422"
+  aws: "20260423"
+  conflation: "20260423"
 
 # Settings for downloading data
 download:
@@ -95,6 +95,7 @@ download:
       - [services_and_business, professional_service]
       - [services_and_business, real_estate_service]
       - [services_and_business, home_service]
+      - [services_and_business, family_service]
       - [community_and_government, social_or_community_service]
       - [community_and_government, government_office]
       - [community_and_government, civic_organization]
@@ -262,8 +263,8 @@ upload:
   s3_bucket: "openpois-public"
   s3_prefix_osm: "snapshots/osm"
   s3_prefix_conflation: "snapshots/conflated"
-  latest_url_osm: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260417/osm_snapshot_partitioned/"
-  latest_url_conflation: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260422/conflated_partitioned/"
+  latest_url_osm: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260423/osm_snapshot_partitioned/"
+  latest_url_conflation: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260423/conflated_partitioned/"
   geohash_precision_partition: 4  # ~39 km x 20 km cells; ~1,000–3,000 cells over CONUS
   geohash_precision_sort: 6       # ~0.6 km x 1.2 km; fine-grained sort within each partition
   # PMTiles generation — single-zoom archive at z14 for both OSM and conflated.

@@ -171,7 +171,7 @@ OVERTURE_MATCH_COLS = [
 # memory after the chunked matcher returns so the matching phase can
 # run without the full source GeoDataFrames resident.
 OSM_MERGE_COLS = [
-    "osm_id", "name", "brand",
+    "osm_id", "osm_type", "name", "brand",
     "conf_mean", "conf_lower", "conf_upper", "geometry",
 ]
 OVERTURE_MERGE_COLS = [
@@ -327,7 +327,29 @@ if __name__ == "__main__":
     # indices match the match-phase output.
     overture_merge_source_path = OVERTURE_PATH
     overture_merge_needs_test_bbox = True
-    if DEDUP_ENABLED:
+    post_dedup_resume_path = conflation_dir / DEDUP_POST_FILTER_FILE
+    if DEDUP_ENABLED and post_dedup_resume_path.exists():
+        print(
+            f"\nReusing post-dedup Overture from "
+            f"{post_dedup_resume_path} (skipping dedup pass)."
+        )
+        overture_gdf = (
+            gpd.read_parquet(post_dedup_resume_path)
+            .reset_index(drop = True)
+        )
+        overture_shared_labels, overture_radii = (
+            assign_overture_shared_label(
+                overture_gdf, load_overture_crosswalk(), match_radii,
+                default_radius_m = DEFAULT_RADIUS_M,
+            )
+        )
+        overture_l0_bits = compute_overture_l0_bits(
+            overture_gdf["taxonomy_l0"].fillna("").to_numpy(),
+        )
+        overture_merge_source_path = post_dedup_resume_path
+        overture_merge_needs_test_bbox = False
+        log_rss("after Overture post-dedup reload")
+    elif DEDUP_ENABLED:
         dedup_checkpoint_dir = (
             conflation_dir / DEDUP_CHECKPOINT_SUBDIR
         )

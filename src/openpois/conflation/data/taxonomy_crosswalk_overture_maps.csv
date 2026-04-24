@@ -295,6 +295,7 @@ services_and_business,home_service,,Home Service
 services_and_business,legal_service,,Legal Service
 services_and_business,professional_service,,Other Professional
 services_and_business,real_estate_service,,Real Estate
+services_and_business,family_service,child_care_and_day_care,Childcare
 travel_and_transportation,fueling_station,ev_charging_station,Charging Station
 travel_and_transportation,fueling_station,gas_station,Gas Station
 travel_and_transportation,fueling_station,,Gas Station
