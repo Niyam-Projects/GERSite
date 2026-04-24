@@ -15,9 +15,9 @@ Each refresh writes a new versioned folder. Inside every version:
 ```
 <YYYY-MM-DD-vN>/
 ├── README.md                     # version metadata (OSM date, Overture release, model)
-├── osm-parquet/                  # OSM-only snapshot, geohash-partitioned
+├── osm-parquet/                  # OSM-only snapshot, hive-partitioned by primary_tag
 ├── osm-pmtiles/osm.pmtiles       # OSM snapshot as a single PMTiles archive
-├── conflated-parquet/            # OSM × Overture conflated snapshot, geohash-partitioned
+├── conflated-parquet/            # OSM × Overture conflated snapshot, hive-partitioned by shared_label
 └── conflated-pmtiles/conflated.pmtiles
 ```
 
@@ -50,18 +50,29 @@ The `osm-parquet/` files contain the same OSM rows before conflation. This data 
 
 ## Quickstart
 
-Read a specific version directly from Source Cooperative (no authentication):
+Read directly from Source Cooperative's S3 mirror (no authentication):
+
+- **pyarrow / GeoPandas** use `pyarrow.fs.S3FileSystem(anonymous=True)` and a
+  bucket-qualified path (no scheme prefix).
+- **DuckDB** uses an `s3://` URL plus an anonymous `SECRET` so its glob
+  expansion works over the bucket listing.
+
+Every example uses `VERSION = "latest"`; swap in a dated folder (e.g.
+`"2026-04-23-v0"`) when you need a reproducible pin.
 
 ### Python: pyarrow
 
 ```python
 import pyarrow.dataset as ds
+import pyarrow.fs as pafs
 
-BASE = "https://data.source.coop/henryspatialanalysis/openpois"
+BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
 VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
+fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
 pois = ds.dataset(
     f"{BASE}/{VERSION}/conflated-parquet/",
+    filesystem = fs,
     format = "parquet",
     partitioning = "hive",
 )
@@ -74,11 +85,18 @@ print(f"{pois.count_rows():,} POIs")
 ```python
 import duckdb
 
-BASE = "https://data.source.coop/henryspatialanalysis/openpois"
+BASE = "s3://us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
 VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
 con = duckdb.connect()
 con.execute("INSTALL httpfs; LOAD httpfs;")
+con.execute("""
+    CREATE OR REPLACE SECRET srccoop (
+        TYPE s3, PROVIDER config,
+        REGION 'us-west-2', URL_STYLE 'path',
+        KEY_ID '', SECRET ''
+    );
+""")
 df = con.execute(f"""
     SELECT shared_label, COUNT(*) AS n
     FROM read_parquet('{BASE}/{VERSION}/conflated-parquet/**/*.parquet',
@@ -94,13 +112,16 @@ print(df)
 
 ```python
 import geopandas as gpd
+import pyarrow.fs as pafs
 
-BASE = "https://data.source.coop/henryspatialanalysis/openpois"
+BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
 VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
-# geohash_prefix=9q is roughly the US West coast
+fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
+# conflated-parquet is hive-partitioned by shared_label.
 gdf = gpd.read_parquet(
-    f"{BASE}/{VERSION}/conflated-parquet/geohash_prefix=9q/part-0.parquet"
+    f"{BASE}/{VERSION}/conflated-parquet/shared_label=Cafe/part-0.parquet",
+    filesystem = fs,
 )
 print(gdf.head())
 ```
