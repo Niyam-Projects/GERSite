@@ -21,6 +21,10 @@ Each refresh writes a new versioned folder. Inside every version:
 └── conflated-pmtiles/conflated.pmtiles
 ```
 
+`latest/` is a server-side mirror of the most recently published version —
+use it for live demos and tutorials, and pin a dated folder
+(e.g. `2026-04-23-v0/`) when you need a stable, reproducible reference.
+
 Browse all versions at
 <https://source.coop/henryspatialanalysis/openpois>.
 
@@ -54,7 +58,7 @@ Read a specific version directly from Source Cooperative (no authentication):
 import pyarrow.dataset as ds
 
 BASE = "https://data.source.coop/henryspatialanalysis/openpois"
-VERSION = "2026-04-23-v0"   # replace with the latest version folder
+VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
 pois = ds.dataset(
     f"{BASE}/{VERSION}/conflated-parquet/",
@@ -71,7 +75,7 @@ print(f"{pois.count_rows():,} POIs")
 import duckdb
 
 BASE = "https://data.source.coop/henryspatialanalysis/openpois"
-VERSION = "2026-04-23-v0"
+VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
 con = duckdb.connect()
 con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -92,7 +96,7 @@ print(df)
 import geopandas as gpd
 
 BASE = "https://data.source.coop/henryspatialanalysis/openpois"
-VERSION = "2026-04-23-v0"
+VERSION = "latest"   # or pin a specific dated folder, e.g. "2026-04-23-v0"
 
 # geohash_prefix=9q is roughly the US West coast
 gdf = gpd.read_parquet(
@@ -123,7 +127,7 @@ PMTiles are authored at zoom 14, so zoom in past z14 to see points.
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script>
   const BASE = "https://data.source.coop/henryspatialanalysis/openpois";
-  const VERSION = "2026-04-23-v0";
+  const VERSION = "latest";   // or pin a specific dated folder, e.g. "2026-04-23-v0"
 
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);

@@ -14,6 +14,8 @@ Remote layout (see docs/data-versioning.md):
             osm-pmtiles/osm.pmtiles
             conflated-parquet/geohash_prefix=*/part-*.parquet
             conflated-pmtiles/conflated.pmtiles
+        latest/
+            (server-side mirror of the most recently published version)
 
 Credentials
 -----------
@@ -41,6 +43,7 @@ from config_versioned import Config
 from openpois.io.credentials import load_source_coop_credentials
 from openpois.io.source_coop import (
     make_client,
+    mirror_prefix,
     public_url,
     upload_bytes,
     upload_directory,
@@ -74,6 +77,13 @@ def parse_args() -> argparse.Namespace:
         help = (
             "Also (re)upload the repo-root README.md and LICENSE. Off by "
             "default because these rarely change."
+        ),
+    )
+    parser.add_argument(
+        "--skip-latest-mirror", action = "store_true",
+        help = (
+            "Skip mirroring the uploaded version to {repo_prefix}/latest/. "
+            "Enabled by default so /latest always tracks the newest release."
         ),
     )
     parser.add_argument(
@@ -171,6 +181,30 @@ def main() -> None:
     )
 
     # -------------------------------------------------------------------------
+    # Mirror the published version to {repo_prefix}/latest/
+    # -------------------------------------------------------------------------
+    latest_prefix = f"{repo_prefix}/latest"
+    if not args.skip_latest_mirror:
+        print()
+        print(f"Mirroring {version_prefix}/ → {latest_prefix}/ …")
+        if args.dry_run:
+            print(
+                "  [dry-run] skipping remote listing — copy/delete counts "
+                "will only reflect real remote state during a live run."
+            )
+        summary = mirror_prefix(
+            client = client,
+            bucket = bucket,
+            src_prefix = f"{version_prefix}/",
+            dst_prefix = f"{latest_prefix}/",
+            dry_run = args.dry_run,
+        )
+        print(
+            f"  copied {summary['copied']} object(s), "
+            f"deleted {summary['deleted']} stale object(s)."
+        )
+
+    # -------------------------------------------------------------------------
     # Top-level README + LICENSE (opt-in)
     # -------------------------------------------------------------------------
     if args.update_top_level:
@@ -194,6 +228,8 @@ def main() -> None:
     print()
     print(f"Version landing page: https://source.coop/{repo_prefix}/")
     print(f"Version data root:    {public_url(f'{version_prefix}/')}")
+    if not args.skip_latest_mirror:
+        print(f"Latest data root:     {public_url(f'{latest_prefix}/')}")
 
 
 if __name__ == "__main__":
