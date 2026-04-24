@@ -15,17 +15,19 @@ from [OpenStreetMap](https://www.openstreetmap.org) and
 - 📘 **Python API docs:** <https://openpois.org/docs/>
 - 🗄️ **Dataset on Source Cooperative:** <https://source.coop/henryspatialanalysis/openpois>
 
+
 ## What is OpenPOIs?
 
 OpenPOIs conflates points of interest from OpenStreetMap and Overture Maps
 into a single unified dataset, then attaches a per-POI confidence score
 estimating the probability that the place still exists. Confidence comes from
 a Bayesian turnover model fit on OSM tag-edit history. The published dataset
-covers the United States and Puerto Rico and is refreshed periodically.
+covers the United States and is refreshed monthly, following the Overture Maps monthly release cycle.
 
 This repository contains the Python library used to produce the data, the
 end-to-end pipelines that download and conflate sources, and the Vue
 front-end that powers the live map.
+
 
 ## Quickstart — read the data
 
@@ -53,9 +55,15 @@ print(f"{pois.count_rows():,} POIs")
 GeoPandas, DuckDB, and PMTiles examples live in the
 [dataset README on Source Cooperative](https://source.coop/henryspatialanalysis/openpois).
 
-## Install the Python library
 
-The package is source-install only for now (not yet on PyPI):
+## Python package
+
+The full OpenPOIs package API — I/O adapters, the turnover model, conflation
+primitives — is documented at <https://openpois.org/docs/>.
+
+### Installation
+
+This package can be installed from source:
 
 ```bash
 git clone https://github.com/henryspatialanalysis/openpois.git
@@ -65,30 +73,17 @@ conda activate openpois
 make install_package    # pip install -e .
 ```
 
-## Library example
+### Repository layout
 
-Load a single category from the published conflated parquet and inspect the
-highest-confidence rows:
+| Path | Purpose |
+|---|---|
+| [src/openpois/](src/openpois/) | Library source: I/O, models, conflation, publishing |
+| [scripts/](scripts/) | End-to-end pipelines using `config.yaml` |
+| [site/](site/) | Vue 3 + Vite frontend powering openpois.org |
+| [docs/](docs/) | Sphinx documentation source |
+| [tests/](tests/) | Unit tests |
 
-```python
-import geopandas as gpd
-import pyarrow.fs as pafs
-
-BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
-VERSION = "latest"
-
-fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
-cafes = gpd.read_parquet(
-    f"{BASE}/{VERSION}/conflated-parquet/shared_label=Cafe/part-0.parquet",
-    filesystem = fs,
-)
-print(cafes.sort_values("conf_mean", ascending = False).head())
-```
-
-The full library API — I/O adapters, the turnover model, conflation
-primitives — is documented at <https://openpois.org/docs/>.
-
-## Reproduce the dataset yourself
+### Reproduce the dataset yourself
 
 The data is produced by four pipelines under [scripts/](scripts/), each
 driven by [config.yaml](config.yaml):
@@ -101,17 +96,7 @@ driven by [config.yaml](config.yaml):
 Each pipeline and its scripts are documented in the workflows reference at
 <https://openpois.org/docs/workflows.html>.
 
-## Repository layout
-
-| Path | Purpose |
-|---|---|
-| [src/openpois/](src/openpois/) | Library source: I/O, models, conflation, publishing |
-| [scripts/](scripts/) | End-to-end pipelines using `config.yaml` |
-| [site/](site/) | Vue 3 + Vite frontend powering openpois.org |
-| [docs/](docs/) | Sphinx documentation source |
-| [tests/](tests/) | Unit tests |
-
-## Web map
+### Web map
 
 The interactive map at <https://openpois.org> is a Vue 3 + Vite app rendering
 PMTiles archives over MapLibre GL. To run it locally:
@@ -125,7 +110,7 @@ The site auto-deploys to GitHub Pages via
 [.github/workflows/deploy-site.yml](.github/workflows/deploy-site.yml) on
 every push to `main` that touches `site/`, `src/`, `docs/`, or `scripts/`.
 
-## Development
+### Development
 
 ```bash
 pytest               # run the test suite
@@ -148,7 +133,7 @@ OpenPOIs is dual-licensed:
 
 ## Citation
 
-If you use OpenPOIs in research or a public product, please cite:
+If you use OpenPOIs in research, please cite:
 
 > Henry, N. (2026). *OpenPOIs: a unified, confidence-scored dataset of U.S. points of interest.* Henry Spatial Analysis. <https://openpois.org>
 
