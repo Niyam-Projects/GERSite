@@ -15,11 +15,18 @@ from __future__ import annotations
 import warnings
 
 import geopandas as gpd
+import pandas as pd
 import pygeohash
 import pytest
 from shapely.geometry import MultiPolygon, Point, Polygon
 
-from openpois.io.geohash_partition import add_geohash_columns, write_partitioned_dataset
+from openpois.io.geohash_partition import (
+    add_geohash_column,
+    add_geohash_columns,
+    compute_primary_osm_tag,
+    write_label_partitioned_dataset,
+    write_partitioned_dataset,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +324,250 @@ class TestWritePartitionedDataset:
         # Easier: just confirm the written rows are the same count and the
         # file is readable — ordering is implicit from the sort_values call.
         assert tbl.num_rows == 3
+
+
+# ---------------------------------------------------------------------------
+# add_geohash_column
+# ---------------------------------------------------------------------------
+
+
+class TestAddGeohashColumn:
+    def test_adds_single_column_with_default_name(self):
+        result = add_geohash_column(_point_gdf((-122.3, 47.6)), precision = 6)
+        assert "geohash" in result.columns
+        # Should not also add the two-column variants
+        assert "geohash_prefix" not in result.columns
+        assert "geohash_sort" not in result.columns
+
+    def test_length_matches_precision(self):
+        result = add_geohash_column(
+            _point_gdf((-122.3, 47.6), (-77.0, 38.9)), precision = 7
+        )
+        assert all(len(v) == 7 for v in result["geohash"])
+
+    def test_values_match_pygeohash(self):
+        lon, lat = -122.3, 47.6
+        result = add_geohash_column(_point_gdf((lon, lat)), precision = 6)
+        assert result["geohash"].iloc[0] == pygeohash.encode(lat, lon, precision = 6)
+
+    def test_custom_out_col_name(self):
+        result = add_geohash_column(
+            _point_gdf((-122.3, 47.6)), precision = 6, out_col = "gh"
+        )
+        assert "gh" in result.columns
+        assert "geohash" not in result.columns
+
+
+# ---------------------------------------------------------------------------
+# compute_primary_osm_tag
+# ---------------------------------------------------------------------------
+
+
+class TestComputePrimaryOsmTag:
+    FILTER_KEYS = [
+        "shop", "healthcare", "leisure", "amenity",
+        "tourism", "office", "craft", "historic",
+    ]
+
+    def _tagged_gdf(self, rows: list[dict]) -> gpd.GeoDataFrame:
+        """Build a GDF with the standard OSM tag columns populated per row."""
+        cols = {k: [] for k in self.FILTER_KEYS}
+        for r in rows:
+            for k in self.FILTER_KEYS:
+                cols[k].append(r.get(k))
+        gdf = gpd.GeoDataFrame(
+            cols,
+            geometry = [Point(-122.3, 47.6) for _ in rows],
+            crs = "EPSG:4326",
+        )
+        return gdf
+
+    def test_picks_highest_priority_when_multiple_present(self):
+        """shop > healthcare > leisure > amenity — first match wins."""
+        gdf = self._tagged_gdf([
+            {"shop": "convenience", "amenity": "fuel"},  # both → primary=shop
+            {"amenity": "restaurant"},                   # only amenity → amenity
+            {"healthcare": "clinic", "amenity": "bank"}, # both → healthcare
+        ])
+        result = compute_primary_osm_tag(gdf, filter_keys = self.FILTER_KEYS)
+        assert result["primary_tag"].tolist() == ["shop", "amenity", "healthcare"]
+
+    def test_custom_out_col_name(self):
+        gdf = self._tagged_gdf([{"shop": "bakery"}])
+        result = compute_primary_osm_tag(
+            gdf, filter_keys = self.FILTER_KEYS, out_col = "tag_key"
+        )
+        assert result["tag_key"].iloc[0] == "shop"
+        assert "primary_tag" not in result.columns
+
+    def test_raises_on_missing_filter_key_column(self):
+        """If a filter_key isn't in the gdf, we should fail loudly."""
+        gdf = self._tagged_gdf([{"shop": "bakery"}])
+        gdf = gdf.drop(columns = ["historic"])
+        with pytest.raises(KeyError, match = "historic"):
+            compute_primary_osm_tag(gdf, filter_keys = self.FILTER_KEYS)
+
+    def test_row_with_no_tags_gets_null_primary(self):
+        gdf = self._tagged_gdf([{}])  # all nulls
+        result = compute_primary_osm_tag(gdf, filter_keys = self.FILTER_KEYS)
+        assert pd.isna(result["primary_tag"].iloc[0])
+
+
+# ---------------------------------------------------------------------------
+# write_label_partitioned_dataset
+# ---------------------------------------------------------------------------
+
+
+class TestWriteLabelPartitionedDataset:
+    def _labeled_gdf(
+        self,
+        rows: list[tuple[str, str]],
+        label_col: str = "shared_label",
+    ) -> gpd.GeoDataFrame:
+        """Build a GDF with (label, geohash) rows and a Point geometry each.
+
+        Points are placed near Seattle; the geohash column is the actual sort
+        key passed in (not derived), to make ordering assertions deterministic.
+        """
+        gdf = gpd.GeoDataFrame(
+            {
+                label_col: [r[0] for r in rows],
+                "geohash": [r[1] for r in rows],
+                "name": [f"p{i}" for i in range(len(rows))],
+            },
+            geometry = [Point(-122.3, 47.6) for _ in rows],
+            crs = "EPSG:4326",
+        )
+        return gdf
+
+    def test_creates_hive_dir_per_unique_value(self, tmp_path):
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6"), ("Bakery", "c23nb7")])
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        dirs = sorted(d.name for d in (tmp_path / "out").iterdir() if d.is_dir())
+        assert dirs == ["shared_label=Bakery", "shared_label=Pharmacy"]
+
+    def test_url_encodes_values_with_spaces(self, tmp_path):
+        gdf = self._labeled_gdf([("Fast Food Restaurant", "c23nb6")])
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        partition = tmp_path / "out" / "shared_label=Fast%20Food%20Restaurant"
+        assert partition.is_dir()
+
+    def test_partition_column_dropped_from_parquet(self, tmp_path):
+        import pyarrow.parquet as pq
+
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        part = next((tmp_path / "out").rglob("*.parquet"))
+        names = pq.read_schema(part).names
+        assert "shared_label" not in names
+
+    def test_sort_column_retained_in_parquet(self, tmp_path):
+        import pyarrow.parquet as pq
+
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        part = next((tmp_path / "out").rglob("*.parquet"))
+        names = pq.read_schema(part).names
+        assert "geohash" in names
+        assert "name" in names
+
+    def test_rows_within_partition_sorted_by_sort_col(self, tmp_path):
+        import pyarrow.parquet as pq
+
+        # Out-of-order geohashes within one partition
+        gdf = self._labeled_gdf(
+            [("Pharmacy", "c23nbz"), ("Pharmacy", "c23nba"), ("Pharmacy", "c23nbm")]
+        )
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        part = next((tmp_path / "out").rglob("*.parquet"))
+        tbl = pq.read_table(part)
+        geohashes = tbl.column("geohash").to_pylist()
+        assert geohashes == sorted(geohashes)
+
+    def test_raises_when_partition_col_missing(self, tmp_path):
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        with pytest.raises(KeyError, match = "partition_col"):
+            write_label_partitioned_dataset(
+                gdf, tmp_path / "out", partition_col = "nonexistent"
+            )
+
+    def test_raises_when_sort_col_missing(self, tmp_path):
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        gdf = gdf.drop(columns = ["geohash"])
+        # Re-add partition col expectations — geohash is required for sort
+        with pytest.raises(KeyError, match = "sort_col"):
+            write_label_partitioned_dataset(
+                gdf, tmp_path / "out", partition_col = "shared_label"
+            )
+
+    def test_null_partition_values_skipped(self, tmp_path):
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6"), (None, "c23nb7")])
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+        dirs = [d.name for d in (tmp_path / "out").iterdir() if d.is_dir()]
+        # Only the non-null row produced a partition
+        assert dirs == ["shared_label=Pharmacy"]
+
+    def test_overwrite_false_raises_if_exists(self, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        with pytest.raises(FileExistsError, match = "overwrite=True"):
+            write_label_partitioned_dataset(
+                gdf, out, partition_col = "shared_label", overwrite = False
+            )
+
+    def test_overwrite_true_replaces_existing(self, tmp_path):
+        out = tmp_path / "out"
+        gdf = self._labeled_gdf([("Pharmacy", "c23nb6")])
+        write_label_partitioned_dataset(gdf, out, partition_col = "shared_label")
+        sentinel = out / "sentinel.txt"
+        sentinel.write_text("old")
+
+        write_label_partitioned_dataset(gdf, out, partition_col = "shared_label")
+        assert not sentinel.exists()
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: DuckDB can decode URL-encoded Hive partition values
+# ---------------------------------------------------------------------------
+
+
+class TestDuckDBHiveRoundtrip:
+    """Confirm that URL-encoded partition names round-trip through DuckDB."""
+
+    def test_duckdb_reads_url_encoded_partition_value(self, tmp_path):
+        duckdb = pytest.importorskip("duckdb")
+
+        gdf = gpd.GeoDataFrame(
+            {
+                "shared_label": ["Fast Food Restaurant", "Bakery"],
+                "geohash": ["c23nb6", "c23nb7"],
+                "payload": [1, 2],
+            },
+            geometry = [Point(-122.3, 47.6), Point(-122.3, 47.6)],
+            crs = "EPSG:4326",
+        )
+        write_label_partitioned_dataset(
+            gdf, tmp_path / "out", partition_col = "shared_label"
+        )
+
+        glob = str(tmp_path / "out" / "**" / "*.parquet")
+        rows = duckdb.sql(
+            f"SELECT shared_label, COUNT(*) AS n "
+            f"FROM read_parquet('{glob}', hive_partitioning = 1) "
+            f"GROUP BY shared_label ORDER BY shared_label"
+        ).fetchall()
+
+        assert rows == [("Bakery", 1), ("Fast Food Restaurant", 1)]

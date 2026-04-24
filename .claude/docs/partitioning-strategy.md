@@ -1,0 +1,119 @@
+# Partitioning strategy
+
+How the rated OSM snapshot and the conflated dataset are laid out on disk, and why.
+
+## Why this layout
+
+Historically both datasets were Hive-partitioned by a 4-character geohash (~1,000–3,000 cells over CONUS) and uploaded to S3 so the web frontend could fetch just the cells covering a map viewport. The current use case is different: **local, nationwide queries filtered primarily by destination type**, with spatial filters as a frequent secondary slice.
+
+Geohash partitioning is actively bad for that pattern — a nationwide "all pharmacies" query has to open every geohash directory. Partitioning by destination type gives near-zero scan for type-filtered queries (one file instead of ~1,500), and we retain spatial efficiency by sorting each partition by geohash so bbox / state / region filters prune via Parquet row-group min/max stats.
+
+Confirmed on the real data: `WHERE shared_label = 'Pharmacy'` on the 17.8 M-row conflated set scans `1/93` files in ~5 ms.
+
+## Layouts
+
+### Conflated (`conflated_partitioned/`)
+
+| | |
+|---|---|
+| Path | `~/data/openpois/conflation/<versions.conflation>/conflated_partitioned/` |
+| Partition column | `shared_label` (URL-encoded in dir name; DuckDB `hive_partitioning=1` decodes transparently) |
+| Partitions | 93 (incl. one `shared_label=` bucket for ~720 k unlabeled POIs that don't map to any crosswalk entry) |
+| Rows | 17,788,585 total for `20260423` |
+| Within-partition sort | ascending `geohash` (precision 6, retained as a column) |
+| Dropped at write | `shared_label` (lives in the Hive dir name) |
+| On-disk size | ~2.7 GB for `20260423` |
+
+### Rated OSM snapshot (`osm_snapshot_partitioned/`)
+
+| | |
+|---|---|
+| Path | `~/data/openpois/snapshots/osm/<versions.osm_data>/osm_snapshot_partitioned/` |
+| Partition column | derived `primary_tag` ∈ {shop, healthcare, leisure, amenity, tourism, office, craft, historic} |
+| Partitions | 8 |
+| Rows | 8,708,504 total for `20260417`. Distribution: amenity 4.90 M, leisure 2.22 M, shop 0.79 M, tourism 0.38 M, office 0.16 M, historic 0.12 M, healthcare 0.11 M, craft 0.03 M |
+| Within-partition sort | ascending `geohash` (precision 6, retained as a column) |
+| Dropped at write | `primary_tag` (lives in the Hive dir name) |
+| On-disk size | ~1.2 GB for `20260417` (down from 1.9 GB under the old geohash layout) |
+
+## `primary_tag` derivation (OSM)
+
+~1.9% of rated OSM POIs carry more than one top-level tag (e.g., OSM id `25603734` has both `shop=convenience` and `amenity=fuel`). To pick one partition per POI we apply the same **first-non-null priority** already used by [assign_osm_shared_label()](../../src/openpois/conflation/taxonomy.py), sourced from [`config.yaml` `download.osm.filter_keys`](../../config.yaml):
+
+```
+shop > healthcare > leisure > amenity > tourism > office > craft > historic
+```
+
+This keeps OSM-only queries and conflation-side labeling consistent: a shop+amenity POI sits under `primary_tag=shop/` and the conflation side labels it via the `shop` crosswalk. All filter-key tag columns (`shop`, `amenity`, etc.) are retained inside the files, so a secondary filter like `primary_tag = 'shop' AND shop = 'bakery'` still works within the one partition that was opened.
+
+Every POI in the rated snapshot has at least one filter-key tag populated (guaranteed by the PBF filtering step in [scripts/osm_snapshot/download.py](../../scripts/osm_snapshot/download.py)), so no null / `__unlabeled__` bucket is needed.
+
+## How to query
+
+All examples use DuckDB with `hive_partitioning=1`, which URL-decodes partition values back to their original form.
+
+```python
+import duckdb
+
+CONFLATED = "~/data/openpois/conflation/20260423/conflated_partitioned/**/*.parquet"
+OSM       = "~/data/openpois/snapshots/osm/20260417/osm_snapshot_partitioned/**/*.parquet"
+```
+
+**Type-only, nationwide — reads one file.**
+
+```sql
+SELECT COUNT(*) FROM read_parquet(CONFLATED, hive_partitioning=1)
+WHERE shared_label = 'Pharmacy';
+```
+
+**Type + spatial bbox via `geohash` prefix — row-group pruning inside one partition.**
+
+```sql
+SELECT name, geohash
+FROM read_parquet(CONFLATED, hive_partitioning=1)
+WHERE shared_label = 'Pharmacy'
+  AND geohash LIKE '9q5%';   -- western US geohash-3 cell
+```
+
+For lat/lon bboxes, convert to geohash prefixes with `pygeohash.bbox`/`expand`. A ZXY or state-level filter can usually be expressed as a small disjunction of `geohash LIKE` prefixes.
+
+**Secondary filter inside an OSM partition.**
+
+```sql
+SELECT COUNT(*) FROM read_parquet(OSM, hive_partitioning=1)
+WHERE primary_tag = 'shop' AND shop = 'bakery';   -- one file scanned
+```
+
+**Joining conflated and OSM (e.g., type breakdown by OSM tag).**
+
+```sql
+SELECT c.shared_label, o.primary_tag, COUNT(*)
+FROM read_parquet(CONFLATED, hive_partitioning=1) c
+JOIN read_parquet(OSM, hive_partitioning=1) o USING (osm_id)
+WHERE c.shared_label = 'Pharmacy'
+GROUP BY 1, 2;
+```
+
+## When NOT to use this layout
+
+The geohash-partitioned layout is a better fit for **small-bbox, many-types-at-once** queries — which is exactly the web-map viewport case we moved away from. If the S3 / map-viewport path comes back, the helpers are still in place: see `add_geohash_columns` and `write_partitioned_dataset` in [src/openpois/io/geohash_partition.py](../../src/openpois/io/geohash_partition.py), and the original S3 upload step in [scripts/conflation/upload_to_s3.py](../../scripts/conflation/upload_to_s3.py). Swap the function calls in the two `format_for_upload.py` scripts back to the geohash variants.
+
+## Maintenance
+
+**Regenerate after a new conflation or snapshot run:**
+
+```bash
+python -u scripts/osm_snapshot/format_for_upload.py   2>&1 | tee ~/data/openpois/logs/osm_repartition_<version>.log
+python -u scripts/conflation/format_for_upload.py     2>&1 | tee ~/data/openpois/logs/conflated_repartition_<version>.log
+```
+
+Each script deletes the existing partitioned directory at its versioned path and rewrites it. Geohash precision is controlled by `upload.geohash_precision_sort` in [config.yaml](../../config.yaml) (currently 6 ≈ 0.6 × 1.2 km).
+
+**Where the code lives:**
+
+- [src/openpois/io/geohash_partition.py](../../src/openpois/io/geohash_partition.py) — `add_geohash_column`, `compute_primary_osm_tag`, `write_label_partitioned_dataset` (plus the older geohash-partition helpers).
+- [scripts/conflation/format_for_upload.py](../../scripts/conflation/format_for_upload.py) — conflated partitioning entry point.
+- [scripts/osm_snapshot/format_for_upload.py](../../scripts/osm_snapshot/format_for_upload.py) — OSM partitioning entry point.
+- [tests/test_geohash_partition.py](../../tests/test_geohash_partition.py) — unit tests + a DuckDB Hive-decode round-trip.
+
+**S3 upload is currently disabled** — `scripts/conflation/upload_to_s3.py` is not run as part of this flow. The `upload.latest_url_*` / `upload.s3_*` keys in `config.yaml` are stale but harmless; clean them up in a later pass if the frontend integration is formally retired.

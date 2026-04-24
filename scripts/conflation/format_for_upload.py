@@ -1,24 +1,25 @@
 """
-Spatially partition the conflated POI dataset for optimized web map viewport queries.
+Partition the conflated POI dataset by destination type for local queries.
 
-Reads conflated.parquet, adds a geohash-4 partition column computed from each POI's
-centroid, sorts rows within partitions by geohash-6 for spatial locality, and writes
-a Hive-style partitioned dataset:
+Reads conflated.parquet, adds a geohash sort key from each POI's centroid,
+and writes a Hive-style dataset partitioned by `shared_label`:
 
     conflated_partitioned/
-        geohash_prefix=9q/
-            part-0.parquet
-        geohash_prefix=dr/
-            part-0.parquet
+        shared_label=Pharmacy/part-0.parquet
+        shared_label=Restaurant/part-0.parquet
         ...
 
-Clients can fetch only the geohash cells covering their map viewport, avoiding a full
-dataset scan.
+Rows within each partition are sorted by the `geohash` column so spatial
+filters prune via Parquet row-group min/max stats. Queries like
+``WHERE shared_label = 'Pharmacy'`` read a single partition file.
 """
 import geopandas as gpd
 from config_versioned import Config
 
-from openpois.io.geohash_partition import add_geohash_columns, write_partitioned_dataset
+from openpois.io.geohash_partition import (
+    add_geohash_column,
+    write_label_partitioned_dataset,
+)
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -30,8 +31,8 @@ INPUT_PATH = config.get_file_path("conflation", "conflated")
 OUTPUT_DIR = config.get_file_path("conflation", "partitioned")
 OVERWRITE = True
 
-PRECISION_PARTITION = config.get("upload", "geohash_precision_partition")
 PRECISION_SORT = config.get("upload", "geohash_precision_sort")
+PARTITION_COL = "shared_label"
 
 # -----------------------------------------------------------------------------
 # Main workflow
@@ -42,15 +43,20 @@ if __name__ == "__main__":
     gdf = gpd.read_parquet(INPUT_PATH)
     print(f"Loaded {len(gdf):,} POIs")
 
-    print("Computing geohash columns from centroids ...")
-    gdf = add_geohash_columns(
+    print(f"Computing geohash-{PRECISION_SORT} sort column from centroids ...")
+    gdf = add_geohash_column(gdf, precision = PRECISION_SORT)
+
+    write_label_partitioned_dataset(
         gdf,
-        precision_partition = PRECISION_PARTITION,
-        precision_sort = PRECISION_SORT,
+        output_dir = OUTPUT_DIR,
+        partition_col = PARTITION_COL,
+        sort_col = "geohash",
+        overwrite = OVERWRITE,
     )
 
-    write_partitioned_dataset(gdf, output_dir = OUTPUT_DIR, overwrite = OVERWRITE)
-
     n_partitions = sum(1 for _ in OUTPUT_DIR.iterdir() if _.is_dir())
-    print(f"Done. Wrote {len(gdf):,} rows across {n_partitions} geohash partitions.")
+    print(
+        f"Done. Wrote {len(gdf):,} rows across {n_partitions} "
+        f"{PARTITION_COL} partitions."
+    )
     print(f"Output: {OUTPUT_DIR}")
