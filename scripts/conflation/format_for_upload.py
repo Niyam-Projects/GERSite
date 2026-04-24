@@ -31,7 +31,7 @@ INPUT_PATH = config.get_file_path("conflation", "conflated")
 OUTPUT_DIR = config.get_file_path("conflation", "partitioned")
 OVERWRITE = True
 
-PRECISION_SORT = config.get("upload", "geohash_precision_sort")
+PRECISION_SORT = config.get("publish", "geohash_precision_sort")
 PARTITION_COL = "shared_label"
 
 # -----------------------------------------------------------------------------

@@ -1,21 +1,33 @@
 ---
 name: conflate-snapshots
-description: Use when the user wants to match rated OSM POIs with Overture POIs into a unified dataset, partition it for web consumption, and push to S3. Triggers: "run conflation", "push new conflated data to S3", "bump conflation version", "reconflate with new parameters", "re-upload the partitioned parquet".
+description: Use when the user wants to match rated OSM POIs with Overture POIs into a unified dataset, partition it for web consumption, and push to Source Cooperative. Triggers: "run conflation", "publish new data", "push new conflated data to Source Cooperative", "bump conflation version", "reconflate with new parameters", "re-upload the partitioned parquet".
 ---
 
-# Conflate snapshots + publish to S3
+# Conflate snapshots + publish to Source Cooperative
 
-Taxonomy-aware matching between rated OSM and Overture, then partition and upload for web consumption.
+Taxonomy-aware matching between rated OSM and Overture, then partition and
+upload for web consumption.
 
 ## Prerequisites
 
 - Rated OSM snapshot (`osm_snapshot_rated.parquet`) at `versions.snapshot_osm` — produced by [skills/full-data-pull](../full-data-pull/SKILL.md) step 3.
 - Overture snapshot (`overture_snapshot.parquet`) at `versions.snapshot_overture`.
-- AWS credentials configured for the `openpois-public` bucket (region `us-west-2`).
+- **Fresh Source Cooperative temp credentials** in `.env.json` at the repo root. Tokens expire in ~1 hour.
+
+> ⚠️ **Credential refresh check.** Source Cooperative uses short-lived AWS
+> credentials (`aws_access_key_id` starting with `ASIA…`). **Before** running
+> step 7, ask the user to regenerate them at
+> <https://source.coop/repositories/henryspatialanalysis/openpois/manage>
+> and overwrite `~/repos/openpois/.env.json`. The upload script will warn if
+> the file looks stale, but it cannot tell whether the token itself has
+> expired until it actually fails.
 
 ## Steps
 
-1. **Bump `versions.conflation` and `versions.aws`** in `config.yaml`. These typically track together since the upload uses the conflation output.
+1. **Bump `versions.conflation` and `versions.source_coop`** in `config.yaml`.
+   `versions.source_coop` is the remote folder name — `YYYY-MM-DD-vN`. Keep
+   `vN` at `v0`; only bump `v1`, `v2`, … if you re-upload under the same
+   calendar date.
 
 2. **Review conflation parameters** (`config.yaml` → `conflation`):
    - `min_match_score` (default 0.50) — raises/lowers match acceptance
@@ -52,33 +64,34 @@ Taxonomy-aware matching between rated OSM and Overture, then partition and uploa
      python -u scripts/conflation/prepare_pmtiles.py \
        2>&1 | tee ~/data/openpois/logs/pmtiles_conflated_<version>.log
      ```
-     Properties and zoom range are configured under `upload.pmtiles` in
+     Properties and zoom range are configured under `publish.pmtiles` in
      `config.yaml`.
 
-7. **Upload to S3** — pushes partitioned parquet AND the matching `.pmtiles`
-   (single file at `…/<version>/<name>.pmtiles`) under `versions.aws`.
+7. **Publish to Source Cooperative** — uploads OSM + conflated parquet,
+   both PMTiles, and a freshly-rendered per-version `README.md` under
+   `<repo>/<versions.source_coop>/`. Confirm the credential check above first.
    ```bash
-   python scripts/osm_snapshot/upload_to_s3.py     # OSM parquet + pmtiles
-   python scripts/conflation/upload_to_s3.py       # conflated parquet + pmtiles
-   ```
-   To upload only the PMTiles (e.g., after regenerating tiles without touching
-   the parquet), use:
-   ```bash
-   python scripts/osm_snapshot/upload_pmtiles_to_s3.py [--s3-version YYYYMMDD]
-   python scripts/conflation/upload_pmtiles_to_s3.py  [--s3-version YYYYMMDD]
-   ```
+   # Preview everything that would be uploaded:
+   python scripts/publish/upload_to_source_coop.py --dry-run
 
-8. **Update latest-URL pointers** in `config.yaml`:
-   ```yaml
-   upload:
-     latest_url_osm:       "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/YYYYMMDD/osm_snapshot_partitioned/"
-     latest_url_conflation: "https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/YYYYMMDD/conflated_partitioned/"
+   # Real upload (datasets + version README):
+   python -u scripts/publish/upload_to_source_coop.py \
+     2>&1 | tee ~/data/openpois/logs/publish_<version>.log
+
+   # If the top-level README or LICENSE changed:
+   python scripts/publish/upload_to_source_coop.py --update-top-level
    ```
+   `--skip-osm-parquet`, `--skip-conflated-parquet`, and `--skip-pmtiles`
+   allow partial reuploads (e.g. after regenerating PMTiles alone).
 
 ## Verification
 
 - `summary_by_label.csv` match rates should resemble the prior run; large drifts mean a parameter or crosswalk regression.
 - `match_diagnostics.parquet` for per-pair forensics on surprising matches.
+- Spot-check the version landing page at
+  <https://source.coop/henryspatialanalysis/openpois/> and confirm the
+  per-version `README.md` renders with the expected OSM date, Overture
+  release, and row counts.
 - See [skills/verify-pipeline-run](../verify-pipeline-run/SKILL.md).
 
 ## Next
@@ -90,4 +103,6 @@ Taxonomy-aware matching between rated OSM and Overture, then partition and uploa
 - Matching: [src/openpois/conflation/match.py](../../../src/openpois/conflation/match.py)
 - Merging: [src/openpois/conflation/merge.py](../../../src/openpois/conflation/merge.py)
 - Taxonomy assignment: [src/openpois/conflation/taxonomy.py](../../../src/openpois/conflation/taxonomy.py)
+- Publish orchestration: [scripts/publish/upload_to_source_coop.py](../../../scripts/publish/upload_to_source_coop.py)
+- Source Coop S3 adapter: [src/openpois/io/source_coop.py](../../../src/openpois/io/source_coop.py)
 - Conflation algorithm docs: [scripts/conflation/README.md](../../../scripts/conflation/README.md)

@@ -29,7 +29,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 | Fit λ from OSM history, rate current snapshots | [skills/model-history-pipeline](skills/model-history-pipeline/SKILL.md) |
 | Iterate model variants on a pinned history run | [skills/iterate-model-types](skills/iterate-model-types/SKILL.md) |
 | Refresh the POI snapshots (OSM / Overture) | [skills/full-data-pull](skills/full-data-pull/SKILL.md) |
-| Conflate OSM + Overture, partition, upload to S3 | [skills/conflate-snapshots](skills/conflate-snapshots/SKILL.md) |
+| Conflate OSM + Overture, partition, publish to Source Cooperative | [skills/conflate-snapshots](skills/conflate-snapshots/SKILL.md) |
 | Bump the frontend to the new data version | [skills/update-site](skills/update-site/SKILL.md) |
 | Post-run QA on any of the above | [skills/verify-pipeline-run](skills/verify-pipeline-run/SKILL.md) |
 

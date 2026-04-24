@@ -10,11 +10,11 @@ versions:
   model_output: "20260416_by_leisure"  # fitted model artifacts (suffix indicates variant)
   snapshot_osm: "20260416"             # OSM current-state snapshot
   snapshot_overture: "20260417"        # Overture snapshot
-  aws: "20260416"                      # S3 prefix for uploaded data
   conflation: "20260417"               # conflated output
+  source_coop: "2026-04-17-v0"         # Source Cooperative upload folder (see below)
 ```
 
-Each key corresponds to a `directories.<key>` entry in `config.yaml` with `versioned: true`.
+Each key corresponds to a `directories.<key>` entry in `config.yaml` with `versioned: true`, except `source_coop`, which only names the remote folder.
 
 ## Path resolution
 
@@ -36,8 +36,9 @@ config.get_file_path("osm_data", "osm_versions")
 
 ## Naming conventions
 
-- **Dates**: `YYYYMMDD`, e.g., `20260416`.
+- **Local dates**: `YYYYMMDD`, e.g., `20260416`.
 - **Model variants**: `{date}_by_{group_key}` (e.g., `20260416_by_leisure`, `20260416_by_amenity`) or `{date}_constant`. See [skills/iterate-model-types](../skills/iterate-model-types/SKILL.md).
+- **Source Coop folder**: `YYYY-MM-DD-v<IDX>`. Default `v0` for every fresh publish; only bump `v1`, `v2`, … if republishing under the same calendar date (e.g. a hot-fix). The Source Coop upload script writes the per-version README into this folder, so the suffix must be unique per upload round.
 - **Independent cadences**: snapshot versions can (and should) differ across sources — Overture releases ~monthly. Don't force them to match.
 
 ## External references (hand-update when bumping)
@@ -46,16 +47,15 @@ Version strings appear in these places outside `versions:` — grep before any c
 
 | File | References |
 |---|---|
-| [config.yaml](../../config.yaml) | `upload.latest_url_osm`, `upload.latest_url_conflation` (full URL with date) |
-| [site/src/constants.js](../../site/src/constants.js) | `OSM_S3_BASE`, `CONFLATED_S3_BASE` |
-| [site/public/about.html](../../site/public/about.html) | Hardcoded S3 browse links in the data-access section |
+| [site/src/constants.js](../../site/src/constants.js) | `OSM_PMTILES_URL`, `CONFLATED_PMTILES_URL` (full `data.source.coop` URLs) |
+| [site/public/about.html](../../site/public/about.html) | Hardcoded Source Coop browse links in the data-access section |
 | `osm_data.apply_model.model_stub` (config.yaml) | Which model family [scripts/osm_snapshot/apply_model.py](../../scripts/osm_snapshot/apply_model.py) ingests |
 
-[skills/update-site](../skills/update-site/SKILL.md) covers the frontend side; [skills/conflate-snapshots](../skills/conflate-snapshots/SKILL.md) covers the upload + config side.
+[skills/update-site](../skills/update-site/SKILL.md) covers the frontend side; [skills/conflate-snapshots](../skills/conflate-snapshots/SKILL.md) covers the publish + config side.
 
 ## Workflow
 
-1. Bump the relevant `versions.*` keys before running a pipeline.
+1. Bump the relevant `versions.*` keys before running a pipeline. For a public release, also bump `versions.source_coop` to the new `YYYY-MM-DD-v0`.
 2. Run the pipeline — outputs land in the versioned directory.
-3. After upload, update `upload.latest_url_*` and the frontend references.
-4. Old versions stay on disk / S3 — delete manually when confident nothing references them.
+3. After publishing, update the frontend references in `site/src/constants.js` and `site/public/about.html`.
+4. Old local versions stay on disk — delete manually when confident nothing references them. Old Source Coop folders stay published indefinitely and serve as an immutable archive.

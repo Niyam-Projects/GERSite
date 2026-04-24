@@ -96,7 +96,7 @@ GROUP BY 1, 2;
 
 ## When NOT to use this layout
 
-The geohash-partitioned layout is a better fit for **small-bbox, many-types-at-once** queries — which is exactly the web-map viewport case we moved away from. If the S3 / map-viewport path comes back, the helpers are still in place: see `add_geohash_columns` and `write_partitioned_dataset` in [src/openpois/io/geohash_partition.py](../../src/openpois/io/geohash_partition.py), and the original S3 upload step in [scripts/conflation/upload_to_s3.py](../../scripts/conflation/upload_to_s3.py). Swap the function calls in the two `format_for_upload.py` scripts back to the geohash variants.
+The geohash-partitioned layout is a better fit for **small-bbox, many-types-at-once** queries — which is exactly the web-map viewport case we moved away from. If the map-viewport path comes back, the helpers are still in place: see `add_geohash_columns` and `write_partitioned_dataset` in [src/openpois/io/geohash_partition.py](../../src/openpois/io/geohash_partition.py), and the Source Cooperative publish step in [scripts/publish/upload_to_source_coop.py](../../scripts/publish/upload_to_source_coop.py). Swap the function calls in the two `format_for_upload.py` scripts back to the geohash variants.
 
 ## Maintenance
 
@@ -107,7 +107,7 @@ python -u scripts/osm_snapshot/format_for_upload.py   2>&1 | tee ~/data/openpois
 python -u scripts/conflation/format_for_upload.py     2>&1 | tee ~/data/openpois/logs/conflated_repartition_<version>.log
 ```
 
-Each script deletes the existing partitioned directory at its versioned path and rewrites it. Geohash precision is controlled by `upload.geohash_precision_sort` in [config.yaml](../../config.yaml) (currently 6 ≈ 0.6 × 1.2 km).
+Each script deletes the existing partitioned directory at its versioned path and rewrites it. Geohash precision is controlled by `publish.geohash_precision_sort` in [config.yaml](../../config.yaml) (currently 6 ≈ 0.6 × 1.2 km).
 
 **Where the code lives:**
 
@@ -116,4 +116,4 @@ Each script deletes the existing partitioned directory at its versioned path and
 - [scripts/osm_snapshot/format_for_upload.py](../../scripts/osm_snapshot/format_for_upload.py) — OSM partitioning entry point.
 - [tests/test_geohash_partition.py](../../tests/test_geohash_partition.py) — unit tests + a DuckDB Hive-decode round-trip.
 
-**S3 upload is currently disabled** — `scripts/conflation/upload_to_s3.py` is not run as part of this flow. The `upload.latest_url_*` / `upload.s3_*` keys in `config.yaml` are stale but harmless; clean them up in a later pass if the frontend integration is formally retired.
+The Source Cooperative publish flow ([scripts/publish/upload_to_source_coop.py](../../scripts/publish/upload_to_source_coop.py)) uploads these same partitioned trees to `<version>/osm-parquet/` and `<version>/conflated-parquet/`. PMTiles generation remains downstream of partitioning.

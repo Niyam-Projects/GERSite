@@ -442,27 +442,28 @@
       any derivative databases under the same license.
     </p>
     <p>
-      The raw snapshot and conflated Parquet files are publicly available on
-      Amazon S3 and can be queried directly with DuckDB, boto3, or any
-      tool that supports S3 access.
+      The raw snapshot and conflated Parquet files are publicly hosted on
+      <a href="https://source.coop/henryspatialanalysis/openpois" target="_blank"
+        rel="noopener noreferrer">Source Cooperative</a> and can be queried
+      directly with pyarrow, DuckDB, or any tool that reads HTTPS Parquet.
     </p>
     <div class="s3-block">
       <div class="s3-block-header">
         <span class="s3-block-title">OSM snapshot</span>
         <a class="s3-browse-link"
-          href="https://openpois-public.s3.us-west-2.amazonaws.com/?list-type=2&prefix=snapshots/osm/20260423/osm_snapshot_partitioned/"
+          href="https://source.coop/henryspatialanalysis/openpois/2026-04-23-v0/osm-parquet/"
           target="_blank" rel="noopener noreferrer">Browse files &rarr;</a>
       </div>
-      <code class="s3-path">s3://openpois-public/snapshots/osm/20260423/osm_snapshot_partitioned/</code>
+      <code class="s3-path">https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/osm-parquet/</code>
     </div>
     <div class="s3-block">
       <div class="s3-block-header">
         <span class="s3-block-title">Conflated dataset</span>
         <a class="s3-browse-link"
-          href="https://openpois-public.s3.us-west-2.amazonaws.com/?list-type=2&prefix=snapshots/conflated/20260423/conflated_partitioned/"
+          href="https://source.coop/henryspatialanalysis/openpois/2026-04-23-v0/conflated-parquet/"
           target="_blank" rel="noopener noreferrer">Browse files &rarr;</a>
       </div>
-      <code class="s3-path">s3://openpois-public/snapshots/conflated/20260423/conflated_partitioned/</code>
+      <code class="s3-path">https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/conflated-parquet/</code>
     </div>
 
     <h2>Python API Documentation</h2>

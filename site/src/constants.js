@@ -7,12 +7,13 @@ import {
   OVERTURE_L0S,
 } from './taxonomy.generated.js'
 
-// S3 URLs — PMTiles archives read via ol-pmtiles.
+// Source Cooperative URLs — PMTiles archives read via ol-pmtiles. Bump the
+// version folder each refresh to match `versions.source_coop` in config.yaml.
 export const OSM_PMTILES_URL =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/osm/20260423/osm_snapshot.pmtiles'
+  'https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/osm-pmtiles/osm.pmtiles'
 
 export const CONFLATED_PMTILES_URL =
-  'https://openpois-public.s3.us-west-2.amazonaws.com/snapshots/conflated/20260423/conflated.pmtiles'
+  'https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/conflated-pmtiles/conflated.pmtiles'
 
 // Overture PMTiles (latest release — update URL on each Overture monthly release)
 export const OVERTURE_PMTILES_URL =

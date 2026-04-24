@@ -60,7 +60,7 @@ Confirm `conf_mean`, `conf_lower`, `conf_upper` columns are populated for every 
 ## Site
 
 - Open the deployed site (or `npm run dev` locally after a constants.js bump).
-- Browser console: no CORS, no 404s on S3 URLs.
+- Browser console: no CORS, no 404s on `data.source.coop` URLs.
 - Filter dropdown: each source (OSM / Overture / Conflated) loads.
 - Popups non-empty; taxonomy legend rendered; PMTiles overlay visible at zoom 14+.
 

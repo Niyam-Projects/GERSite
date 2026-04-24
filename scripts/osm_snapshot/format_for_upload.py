@@ -38,7 +38,7 @@ OUTPUT_DIR = config.get_file_path("snapshot_osm", "partitioned")
 OVERWRITE = True
 
 FILTER_KEYS = config.get("download", "osm", "filter_keys")
-PRECISION_SORT = config.get("upload", "geohash_precision_sort")
+PRECISION_SORT = config.get("publish", "geohash_precision_sort")
 PARTITION_COL = "primary_tag"
 
 # -----------------------------------------------------------------------------

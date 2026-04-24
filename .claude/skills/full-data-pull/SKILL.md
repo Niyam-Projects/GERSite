@@ -1,6 +1,6 @@
 ---
 name: full-data-pull
-description: Use when the user wants to refresh the independent POI snapshots (OSM, Overture) and rate the OSM snapshot for conflation. Triggers: "refresh all snapshots", "do a new data pull", "download new OSM/Overture", "monthly data refresh", "pull the latest POI data". Does NOT include conflation or S3 upload — those live in conflate-snapshots.
+description: Use when the user wants to refresh the independent POI snapshots (OSM, Overture) and rate the OSM snapshot for conflation. Triggers: "refresh all snapshots", "do a new data pull", "download new OSM/Overture", "monthly data refresh", "pull the latest POI data". Does NOT include conflation or Source Cooperative publishing — those live in conflate-snapshots.
 ---
 
 # Full data pull

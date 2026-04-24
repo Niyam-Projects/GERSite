@@ -21,11 +21,11 @@ config = Config("~/repos/openpois/config.yaml")
 INPUT_PATH = config.get_file_path("snapshot_osm", "rated_snapshot")
 OUTPUT_PATH = config.get_file_path("snapshot_osm", "pmtiles")
 
-LAYER_NAME = config.get("upload", "pmtiles", "osm_layer_name")
-PROPERTIES = config.get("upload", "pmtiles", "osm_properties")
-MIN_ZOOM = config.get("upload", "pmtiles", "min_zoom")
-MAX_ZOOM = config.get("upload", "pmtiles", "max_zoom")
-DROP_STRATEGY = config.get("upload", "pmtiles", "drop_strategy")
+LAYER_NAME = config.get("publish", "pmtiles", "osm_layer_name")
+PROPERTIES = config.get("publish", "pmtiles", "osm_properties")
+MIN_ZOOM = config.get("publish", "pmtiles", "min_zoom")
+MAX_ZOOM = config.get("publish", "pmtiles", "max_zoom")
+DROP_STRATEGY = config.get("publish", "pmtiles", "drop_strategy")
 
 # -----------------------------------------------------------------------------
 # Main workflow
