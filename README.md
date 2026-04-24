@@ -1,72 +1,161 @@
-# openpois
+# OpenPOIs
 
-A Python library for modeling POI (Point of Interest) stability over time using historical OpenStreetMap data, with utilities for downloading current POI snapshots from multiple sources.
+A unified, confidence-scored open dataset of U.S. points of interest, built
+from [OpenStreetMap](https://www.openstreetmap.org) and
+[Overture Maps](https://overturemaps.org).
 
-## Setup
+![OpenPOIs interactive map](docs/_static/hero.png)
 
-```bash
-make build_env        # Create conda environment from environment.yml
-make install_package  # Install openpois in editable mode
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Data: ODbL](https://img.shields.io/badge/Data-ODbL%20v1.0-orange.svg)](https://opendatacommons.org/licenses/odbl/1-0/)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](pyproject.toml)
+[![Site deploy](https://github.com/henryspatialanalysis/openpois/actions/workflows/deploy-site.yml/badge.svg)](https://github.com/henryspatialanalysis/openpois/actions/workflows/deploy-site.yml)
+
+- 🌐 **Live map:** <https://openpois.org>
+- 📘 **Python API docs:** <https://openpois.org/docs/>
+- 🗄️ **Dataset on Source Cooperative:** <https://source.coop/henryspatialanalysis/openpois>
+
+## What is OpenPOIs?
+
+OpenPOIs conflates points of interest from OpenStreetMap and Overture Maps
+into a single unified dataset, then attaches a per-POI confidence score
+estimating the probability that the place still exists. Confidence comes from
+a Bayesian turnover model fit on OSM tag-edit history. The published dataset
+covers the United States and Puerto Rico and is refreshed periodically.
+
+This repository contains the Python library used to produce the data, the
+end-to-end pipelines that download and conflate sources, and the Vue
+front-end that powers the live map.
+
+## Quickstart — read the data
+
+No install required. The dataset is hosted anonymously on Source Cooperative;
+read it straight from S3:
+
+```python
+import pyarrow.dataset as ds
+import pyarrow.fs as pafs
+
+BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
+VERSION = "latest"   # or pin a dated folder, e.g. "2026-04-23-v0"
+
+fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
+pois = ds.dataset(
+    f"{BASE}/{VERSION}/conflated-parquet/",
+    filesystem = fs,
+    format = "parquet",
+    partitioning = "hive",
+)
+print(pois.schema)
+print(f"{pois.count_rows():,} POIs")
 ```
 
-## POI Snapshot Downloads
+GeoPandas, DuckDB, and PMTiles examples live in the
+[dataset README on Source Cooperative](https://source.coop/henryspatialanalysis/openpois).
 
-Two exploratory scripts download current US-wide POI snapshots from different sources. Both output GeoParquet to `~/data/`.
+## Install the Python library
 
-### OpenStreetMap
-
-Downloads the Geofabrik US extract (~11 GB), filters to POI-relevant tags with osmium-tool, and parses with pyosmium.
-
-```bash
-python exploratory/osm_snapshot/download.py
-```
-
-Output: `~/data/openpois/snapshots/osm/<VERSION>/osm_snapshot.parquet` (~7.8M POIs)
-
-### Overture Maps
-
-Queries the public Overture Maps S3 bucket directly via DuckDB. No authentication required.
+The package is source-install only for now (not yet on PyPI):
 
 ```bash
-python exploratory/overture/download.py
+git clone https://github.com/henryspatialanalysis/openpois.git
+cd openpois
+make build_env          # conda env from environment.yml
+conda activate openpois
+make install_package    # pip install -e .
 ```
 
-Output: `~/data/openpois/snapshots/overture/<VERSION>/overture_snapshot.parquet` (~13M POIs)
+## Library example
 
-### Configuration
+Load a single category from the published conflated parquet and inspect the
+highest-confidence rows:
 
-All download settings (bounding boxes, category filters, release dates, output paths) are in `config.yaml`. Set `release_date: null` under any source to auto-detect the latest available snapshot.
+```python
+import geopandas as gpd
+import pyarrow.fs as pafs
 
----
+BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
+VERSION = "latest"
 
-## Web Map
+fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
+cafes = gpd.read_parquet(
+    f"{BASE}/{VERSION}/conflated-parquet/shared_label=Cafe/part-0.parquet",
+    filesystem = fs,
+)
+print(cafes.sort_values("conf_mean", ascending = False).head())
+```
 
-`site/` contains a full-screen interactive web map for exploring the POI snapshots. It shows OpenStreetMap and Overture Maps data with confidence-based coloring (red → yellow → green), address search, and click-to-inspect popups.
+The full library API — I/O adapters, the turnover model, conflation
+primitives — is documented at <https://openpois.org/docs/>.
+
+## Reproduce the dataset yourself
+
+The data is produced by four pipelines under [scripts/](scripts/), each
+driven by [config.yaml](config.yaml):
+
+1. Snapshot downloads (OSM + Overture)
+2. OSM history download and Bayesian turnover-model fit
+3. Apply model to OSM snapshot to get per-POI confidence
+4. Conflate OSM × Overture, partition, publish to Source Cooperative
+
+Each pipeline and its scripts are documented in the workflows reference at
+<https://openpois.org/docs/workflows.html>.
+
+## Repository layout
+
+| Path | Purpose |
+|---|---|
+| [src/openpois/](src/openpois/) | Library source: I/O, models, conflation, publishing |
+| [scripts/](scripts/) | End-to-end pipelines using `config.yaml` |
+| [site/](site/) | Vue 3 + Vite frontend powering openpois.org |
+| [docs/](docs/) | Sphinx documentation source |
+| [tests/](tests/) | Unit tests |
+
+## Web map
+
+The interactive map at <https://openpois.org> is a Vue 3 + Vite app rendering
+PMTiles archives over MapLibre GL. To run it locally:
 
 ```bash
-make site_dev    # Serve locally with hot reload (http://localhost:5173)
-make site_build  # Build for production (output: site/dist/)
+make site_dev      # http://localhost:5173, hot reload
+make site_build    # production build to site/dist/
 ```
 
-The site is automatically deployed to GitHub Pages via GitHub Actions on every push to `main` that touches `site/**`. The deployment workflow is at `.github/workflows/deploy-site.yml`.
-
----
-
-## Historical OSM Change-Rate Modeling
-
-The core workflow models how long POI tags remain stable over time using historical OSM data.
-
-```bash
-python exploratory/osm_data/download.py       # Download OSM history for a bounding box
-python exploratory/osm_data/format_tabular.py # Format into observation records
-python scripts/models/osm_turnover.py         # Fit Poisson change-rate model (JAX)
-```
-
----
+The site auto-deploys to GitHub Pages via
+[.github/workflows/deploy-site.yml](.github/workflows/deploy-site.yml) on
+every push to `main` that touches `site/`, `src/`, `docs/`, or `scripts/`.
 
 ## Development
 
 ```bash
-pytest                # Run tests
-make export_env       # Export conda environment after adding dependencies
+pytest               # run the test suite
+make lint            # flake8 + pylint
+make export_env      # rewrite environment.yml after adding deps
 ```
+
+## Licensing
+
+OpenPOIs is dual-licensed:
+
+- **Code** — [MIT License](LICENSE). You can use, modify, and redistribute the
+  Python package, scripts, and front-end freely.
+- **Data** — [Open Database License (ODbL) v1.0](https://opendatacommons.org/licenses/odbl/1-0/).
+  The published parquet and PMTiles archives are derivative works of
+  OpenStreetMap and Overture Maps and inherit ODbL terms. Any public use must
+  attribute OpenPOIs, [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
+  and the [Overture Maps Foundation](https://docs.overturemaps.org/attribution/).
+  Derivative databases must be released under the same license.
+
+## Citation
+
+If you use OpenPOIs in research or a public product, please cite:
+
+> Henry, N. (2026). *OpenPOIs: a unified, confidence-scored dataset of U.S. points of interest.* Henry Spatial Analysis. <https://openpois.org>
+
+A machine-readable citation is provided in [CITATION.cff](CITATION.cff);
+GitHub renders it as a "Cite this repository" button on the repo home page.
+
+## Contact
+
+Bug reports, feature requests, and contributions are welcome via
+[GitHub issues](https://github.com/henryspatialanalysis/openpois/issues).
