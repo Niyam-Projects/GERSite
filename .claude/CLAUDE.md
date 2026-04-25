@@ -51,6 +51,7 @@ Style: Black (format-on-save in VSCode). Lint: flake8 + pylint, configured in `p
 - [docs/data-sources.md](docs/data-sources.md) — URLs, auth, schema quirks for every source
 - [docs/taxonomy-setup.md](docs/taxonomy-setup.md) — crosswalk CSVs, build_taxonomy.py, frontend sync
 - [docs/data-versioning.md](docs/data-versioning.md) — `versions:` block, path resolution, external references
+- [docs/package-versioning.md](docs/package-versioning.md) — semver bumps for the Python package + Vue site + Sphinx docs (distinct from data versioning)
 - [docs/partitioning-strategy.md](docs/partitioning-strategy.md) — Hive layout of the partitioned Parquet (`shared_label` for conflated, `primary_tag` for OSM), query patterns, when each layout applies
 - [docs/turnover-model-methodology.md](docs/turnover-model-methodology.md) — statistical derivation of the POI turnover model with ZIE extension
 
