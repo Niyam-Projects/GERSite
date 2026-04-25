@@ -136,7 +136,7 @@ def _build_random_by_type(df, reparam = None):
 
 @pytest.mark.parametrize("reparam", ["non_centered", "centered"])
 def test_random_by_type_recovery(reparam):
-    """RandomByTypeModel should recover per-group mean lambdas under both parameterisations."""
+    """Recover per-group mean lambdas under both parameterisations."""
     group_names = ["aaa", "bbb", "ccc"]
     true_log_lambda_0 = -1.0
     true_epsilons = np.array([-0.5, 0.0, 0.6])

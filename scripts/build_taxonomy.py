@@ -89,7 +89,10 @@ def build_rows(radii, osm, overture):
         .fillna("")
     )
     df = df.iloc[
-        sorted(range(len(df)), key = lambda i: (df.index[i].startswith("Other "), df.index[i]))
+        sorted(
+            range(len(df)),
+            key = lambda i: (df.index[i].startswith("Other "), df.index[i]),
+        )
     ]
     rows = []
     for label, row in df.iterrows():
@@ -302,7 +305,8 @@ def render(rows):
   </main>
 
   <footer>
-    OpenPOIs &mdash; by <a href="https://henryspatialanalysis.com/">Henry Spatial Analysis</a>
+    OpenPOIs &mdash;
+    by <a href="https://henryspatialanalysis.com/">Henry Spatial Analysis</a>
     &mdash; <a href="https://github.com/henryspatialanalysis/openpois">GitHub</a>
     &mdash; MIT License
   </footer>

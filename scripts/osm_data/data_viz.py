@@ -15,7 +15,8 @@ Config keys used (config.yaml):
     directories.osm_data           — directory containing input parquet and viz/ output
     osm_data.tag_key               — tag key whose changes define observation
                                      events (used only in plot titles)
-    osm_data.timestamp_cols        — columns to parse as timestamps (rows with nulls dropped)
+    osm_data.timestamp_cols        — columns to parse as timestamps (rows with
+                                     nulls dropped)
     osm_data.top_n_types           — number of top shared labels in the multi-panel figure
     download.osm.end_date          — right-censoring date for still-unchanged tags
     osm_data.apply_model.model_stub — stub for loading model predictions
@@ -100,6 +101,7 @@ def fig_save(
         verbose = False,
         **kwargs
     )
+
 
 def get_preds_dict(model_stub: str | None) -> dict[str, pd.DataFrame]:
     """Load constant and shared-label model predictions."""

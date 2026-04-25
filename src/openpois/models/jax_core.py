@@ -249,7 +249,10 @@ def nuts_sample_multichain(
             verbose = verbose,
         )
         # Add a leading singleton chain axis so downstream code is shape-uniform.
-        add_axis = lambda x: jnp.expand_dims(x, axis = 0)
+
+        def add_axis(x):
+            return jnp.expand_dims(x, axis = 0)
+
         return (
             jax.tree_util.tree_map(add_axis, draws),
             jax.tree_util.tree_map(add_axis, info),

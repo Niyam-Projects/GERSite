@@ -55,7 +55,11 @@ def parse_js_object_keys(text, name):
     )
     if not match:
         raise ValueError(f"Could not find `const {name}` in JS source")
-    return set(re.findall(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:", match.group(1), flags = re.MULTILINE))
+    return set(re.findall(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:",
+        match.group(1),
+        flags = re.MULTILINE,
+    ))
 
 
 def report_diff(name, csv_set, js_set):

@@ -4,9 +4,8 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
 import pytest
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import Point, Polygon
 
 from openpois.conflation.merge import (
     build_merge_parts,
@@ -474,10 +473,6 @@ class TestBuildMergePartsChunked:
         )
         try:
             per_chunk = [gpd.read_parquet(p) for p in paths]
-            disk = gpd.GeoDataFrame(
-                pd.concat(per_chunk, ignore_index = True),
-                crs = per_chunk[0].crs,
-            )
         finally:
             for p in paths:
                 p.unlink(missing_ok = True)

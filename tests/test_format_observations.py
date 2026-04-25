@@ -208,7 +208,8 @@ class TestFormatObservationsDuckdb:
         amenities = list(out["amenity"].fillna(""))
         lasts = list(out["amenity_last_value"].fillna(""))
         assert amenities == ["restaurant", "restaurant", "bar"]
-        # v1: pre-change was None; v2: no change → last stays empty; v3: last = "restaurant".
+        # v1: pre-change was None; v2: no change → last stays empty;
+        # v3: last = "restaurant".
         assert lasts == ["", "", "restaurant"]
 
     def test_left_join_null_inheritance(self, tmp_path):

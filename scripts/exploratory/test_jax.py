@@ -52,10 +52,15 @@ def log_posterior(params, data):
     lp = 0.0
     lp += jnp.sum(stats.norm.logpdf(params['alpha'], loc = 0.0, scale = 5.0))
     lp += jnp.sum(stats.norm.logpdf(params['beta'], loc = 0.0, scale = 2.5))
-    lp += jnp.sum(stats.norm.logpdf(params['log_sigma'], loc = jnp.log(0.2), scale = 0.25))
+    lp += jnp.sum(stats.norm.logpdf(
+        params['log_sigma'], loc = jnp.log(0.2), scale = 0.25
+    ))
     mu = params['alpha'] + data['x'] @ params['beta']
-    lp += jnp.sum(stats.norm.logpdf(data['y'], loc = mu, scale = jnp.exp(params['log_sigma'])))
+    lp += jnp.sum(stats.norm.logpdf(
+        data['y'], loc = mu, scale = jnp.exp(params['log_sigma'])
+    ))
     return lp
+
 
 def predict(key, params, data, add_sigma: bool = True):
     mu = params['alpha'] + data['x'] @ params['beta']

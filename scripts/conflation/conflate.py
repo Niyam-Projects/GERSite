@@ -55,11 +55,6 @@ from openpois.conflation.match import (
     find_spatial_candidates,
     select_best_matches,
 )
-
-CHECKPOINT_SUBDIR = "chunk_matches"
-DEDUP_CHECKPOINT_SUBDIR = "chunk_selfdedup"
-DEDUP_DROPPED_FILE = "overture_dedup_dropped.parquet"
-DEDUP_POST_FILTER_FILE = "overture_post_dedup.parquet"
 from openpois.conflation.merge import (
     build_merge_parts,
     build_merge_parts_chunked,
@@ -75,6 +70,11 @@ from openpois.conflation.taxonomy import (
     load_overture_crosswalk,
     load_top_level_matches,
 )
+
+CHECKPOINT_SUBDIR = "chunk_matches"
+DEDUP_CHECKPOINT_SUBDIR = "chunk_selfdedup"
+DEDUP_DROPPED_FILE = "overture_dedup_dropped.parquet"
+DEDUP_POST_FILTER_FILE = "overture_post_dedup.parquet"
 
 
 # -----------------------------------------------------------------

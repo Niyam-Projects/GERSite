@@ -387,7 +387,7 @@ class TestComputePrimaryOsmTag:
         gdf = self._tagged_gdf([
             {"shop": "convenience", "amenity": "fuel"},  # both → primary=shop
             {"amenity": "restaurant"},                   # only amenity → amenity
-            {"healthcare": "clinic", "amenity": "bank"}, # both → healthcare
+            {"healthcare": "clinic", "amenity": "bank"},  # both → healthcare
         ])
         result = compute_primary_osm_tag(gdf, filter_keys = self.FILTER_KEYS)
         assert result["primary_tag"].tolist() == ["shop", "amenity", "healthcare"]

@@ -716,7 +716,7 @@ def save_conflated_from_parts(
         p.unlink()
     part_paths[0].parent.rmdir()
 
-    print(f"  Done.")
+    print("  Done.")
     return n
 
 

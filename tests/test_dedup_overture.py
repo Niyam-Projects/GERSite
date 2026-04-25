@@ -4,7 +4,6 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pytest
 from shapely.geometry import Point
 
 from openpois.conflation.dedup_overture import (
@@ -141,7 +140,6 @@ class TestFindSelfMatchesChunked:
         # Two POIs ~11 m apart with identical name + taxonomy →
         # strong match, emitted once.
         coords = [(-122.335, 47.608), (-122.335, 47.6081)]
-        n = 2
         shared_labels = np.array(["bank", "bank"], dtype = object)
         l0_bits = np.array([1, 1], dtype = np.uint16)
         names = np.array(["US Bank", "US Bank"], dtype = object)
@@ -175,12 +173,10 @@ class TestFindSelfMatchesChunked:
 
     def test_far_points_no_pair(self):
         # Two POIs ~1 km apart → beyond 100 m max_radius.
-        coords = [(-122.335, 47.608), (-122.335, 47.618)]
         centroids = np.array(
             [[-122.335, 47.608], [-122.335, 47.618]],
             dtype = np.float64,
         )
-        n = 2
         pairs, _ = find_self_matches_chunked(
             centroids_lonlat = centroids,
             radii_m = np.array([100.0, 100.0], dtype = np.float32),
