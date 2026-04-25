@@ -1,4 +1,4 @@
-#!/home/nathenry/miniforge3/envs/openpois/bin/python
+#!/usr/bin/env python
 """
 Summarize the conflated dataset by shared_label and source.
 

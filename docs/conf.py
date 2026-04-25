@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath("../src/"))
 # -- Project information -------------------------------------------------------
 
 project = "openpois"
-copyright = "2024, Nathaniel Henry"
+copyright = "2026, Nathaniel Henry"
 author = "Nathaniel Henry"
 release = "0.1.0"
 

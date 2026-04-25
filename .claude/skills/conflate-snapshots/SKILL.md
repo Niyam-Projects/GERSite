@@ -18,7 +18,7 @@ upload for web consumption.
 > credentials (`aws_access_key_id` starting with `ASIA…`). **Before** running
 > step 7, ask the user to regenerate them at
 > <https://source.coop/repositories/henryspatialanalysis/openpois/manage>
-> and overwrite `~/repos/openpois/.env.json`. The upload script will warn if
+> and overwrite `.env.json` at the repo root. The upload script will warn if
 > the file looks stale, but it cannot tell whether the token itself has
 > expired until it actually fails.
 

@@ -12,7 +12,7 @@ Reference for every external data source openpois ingests. For the workflow that
 - **Auth**: OAuth — any OSM account works. Produce a Netscape-format cookie jar (browser export or Geofabrik's `oauth_cookie_client.py`). Path: `download.osm.history_cookie_file` (default `~/data/openpois/.creds/geofabrik_cookies.txt`).
 - **Pipeline**: `osmium tags-filter --omit-referenced` → `osmium time-filter` → pyosmium streams to `osm_versions.parquet` + `osm_changes.parquet`.
 - **Entry**: [src/openpois/io/osm_history_pbf.py](../../src/openpois/io/osm_history_pbf.py) (`download_osm_history`).
-- **Config**: `download.osm.start_date`, `end_date`, `date_interval_days`, `filter_keys`, `extract_keys`.
+- **Config**: `download.osm.start_date`, `end_date`, `filter_keys`, `extract_keys`.
 
 ## OSM snapshot (Geofabrik standard PBFs)
 
@@ -55,11 +55,3 @@ Reference for every external data source openpois ingests. For the workflow that
 - **Returns**: `(boundary_gdf, coarse_bboxes)` — single-row dissolved+buffered polygon (EPSG:4326) plus a list of bboxes for predicate pushdown.
 - **Antimeridian**: Aleutians split into two bboxes (Near Islands at +172°E vs. rest of AK at negative longitudes).
 
-## Legacy: Overpass-based OSM history
-
-Still wired up but superseded by the PBF pipeline. Queries Overpass API for element IDs in a bbox, then fetches per-element histories from the OSM API.
-
-- **Config**: `download.osm.history_bbox` (Seattle-scoped; Overpass can't serve US-wide histories).
-- **Entry**: [src/openpois/io/osm_history.py](../../src/openpois/io/osm_history.py) (`download_element_histories`).
-- **Script**: `scripts/osm_data/download.py`.
-- **When to use**: city-scale testing, or if Geofabrik OAuth is unavailable.

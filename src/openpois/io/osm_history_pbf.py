@@ -35,9 +35,8 @@ section on cookie acquisition for details.
 
 osmium-tool CLI must be installed (conda install -c conda-forge osmium-tool).
 
-Note: This module is separate from openpois.io.osm_history (Overpass + OSM API
-for Seattle-scale experiments) and openpois.io.osm_snapshot (current POI
-snapshot only).
+Note: This module is separate from openpois.io.osm_snapshot, which extracts
+the current POI snapshot only.
 """
 from __future__ import annotations
 
@@ -94,7 +93,7 @@ def _resolve_osmium() -> str:
 
 
 # -----------------------------------------------------------------------------
-# Tag-diff logic (ported from osm_history.compare_tags)
+# Tag-diff logic
 # -----------------------------------------------------------------------------
 
 
@@ -105,10 +104,9 @@ def _diff_tag_sets(
     """
     Compute tag-level changes between two versions' tag sets.
 
-    Port of openpois.io.osm_history.compare_tags that returns list-of-dicts
-    instead of a DataFrame. The classification rule is identical: Added if
-    the key is only in curr_tags, Deleted if only in prev_tags, Changed if
-    the key is in both but with different values.
+    Returns list-of-dicts. The classification rule: Added if the key is only
+    in curr_tags, Deleted if only in prev_tags, Changed if the key is in
+    both but with different values.
 
     Args:
         prev_tags: Set of (key, value) tuples from the previous version.
@@ -374,9 +372,9 @@ def _tag_set_for_version(obj: osmium.osm.OSMObject) -> set[tuple[str, str]]:
     """
     Build the (key, value) tag set for one element version.
 
-    Follows openpois.io.osm_history.process_version: OSM tags are combined with
-    the pseudo-tags ``visible`` (and ``lat``/``lon`` for nodes) so that
-    lat/lon edits and visibility changes show up as entries in osm_changes.
+    OSM tags are combined with the pseudo-tags ``visible`` (and ``lat``/``lon``
+    for nodes) so that lat/lon edits and visibility changes show up as entries
+    in osm_changes.
 
     Args:
         obj: A pyosmium element version (node / way / relation).

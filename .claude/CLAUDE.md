@@ -9,7 +9,9 @@ make build_env       # Create conda env from environment.yml (name: openpois, Py
 make install_package # pip install -e . (editable install)
 ```
 
-Python executable: `/home/nathenry/miniforge3/envs/openpois/bin/python`.
+Python executable: `$CONDA_PREFIX/bin/python` after `conda activate openpois`.
+
+> **Note on data paths.** Examples in this directory show resolved paths under `~/data/openpois/...`, which is the maintainer's configured `directories.*.path` value in `config.yaml`. Substitute your own `directories.*.path` root when reading them; the layout under that root is set by `config.yaml`.
 
 ## Common commands
 

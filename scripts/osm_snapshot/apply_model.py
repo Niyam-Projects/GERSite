@@ -1,4 +1,4 @@
-#!/home/nathenry/miniforge3/envs/openpois/bin/python
+#!/usr/bin/env python
 """
 Apply OSM change-rate model predictions to the OSM POI snapshot.
 

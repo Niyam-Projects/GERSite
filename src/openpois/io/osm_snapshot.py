@@ -30,9 +30,9 @@ US + PR footprint.
 
 osmium-tool CLI must be installed (conda install -c conda-forge osmium-tool).
 
-Note: This module is separate from openpois.io.osm_history, which fetches
-historical OSM element version data for change-rate modeling. This module
-downloads a current snapshot only.
+Note: This module is separate from openpois.io.osm_history_pbf, which fetches
+full-history PBFs for change-rate modeling. This module downloads a current
+snapshot only.
 """
 from __future__ import annotations
 

@@ -51,15 +51,16 @@ used for type-agreement scoring.
 io
 --
 
-openpois.io.osm_history
-~~~~~~~~~~~~~~~~~~~~~~~
+openpois.io.osm_history_pbf
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Download OpenStreetMap element change histories via the Overpass and OSM APIs.
-Builds Overpass queries across a configured date range to collect element IDs,
-then fetches the full version history of each element, producing per-version
-and per-change tables suitable for the change-rate model.
+Download Geofabrik full-history PBFs (US + Puerto Rico), filter to POI tags
+with ``osmium tags-filter``, time-window with ``osmium time-filter``, and parse
+with pyosmium into per-version and per-change Parquet tables suitable for the
+change-rate model. Uses an OAuth cookie jar against Geofabrik's internal
+server.
 
-.. automodule:: openpois.io.osm_history
+.. automodule:: openpois.io.osm_history_pbf
    :members:
    :undoc-members:
    :show-inheritance:
@@ -105,15 +106,27 @@ sorts rows within each partition by a finer geohash for spatial locality.
    :undoc-members:
    :show-inheritance:
 
-openpois.io.s3
-~~~~~~~~~~~~~~
+openpois.io.source_coop
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Upload a locally partitioned dataset to a public S3 bucket. Walks the Hive
-partition directory, uploads each Parquet file under a versioned S3 prefix
-with public-read ACL, and reports the public base URL on completion. Requires
-AWS credentials via environment variables or ``~/.aws/credentials``.
+Upload a locally partitioned dataset to Source Cooperative's S3-compatible
+storage. Walks the Hive partition directory, uploads each Parquet file under
+a versioned prefix, and reports the public URL on completion. Credentials
+come from a JSON file at the repo root (``publish.credentials_file``).
 
-.. automodule:: openpois.io.s3
+.. automodule:: openpois.io.source_coop
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+openpois.io.credentials
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Load Source Cooperative AWS-compatible credentials from a JSON file. Tokens
+are short-lived (~1 hour); the loader logs a clear error pointing at the
+credentials regeneration URL when the file is stale or missing.
+
+.. automodule:: openpois.io.credentials
    :members:
    :undoc-members:
    :show-inheritance:

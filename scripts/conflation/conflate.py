@@ -1,4 +1,4 @@
-#!/home/nathenry/miniforge3/envs/openpois/bin/python
+#!/usr/bin/env python
 """
 Conflate rated OSM POIs with Overture Maps POIs into a unified dataset.
 

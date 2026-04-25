@@ -20,7 +20,7 @@ CONDA_PYTHON := $(shell conda run -n openpois which python 2>/dev/null || echo p
 CONDA_BIN := $(dir $(CONDA_PYTHON))
 
 lint:
-	@$(CONDA_BIN)flake8 src/ exploratory/ tests/
+	@$(CONDA_BIN)flake8 src/ scripts/ tests/
 	@$(CONDA_BIN)pylint src/openpois/
 
 # Build the site for production

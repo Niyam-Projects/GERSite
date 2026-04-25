@@ -1,19 +1,46 @@
 Workflows
 =========
 
-This page describes the four end-to-end pipelines that make up the openpois
-data processing system, in the order they should be executed. Each pipeline
-is implemented as a series of scripts in the ``scripts/`` directory; the
-scripts call library functions documented in the :doc:`api`.
+This page describes the four end-to-end pipelines that produce the openpois
+dataset, in the order they are executed. Each pipeline is implemented as a
+series of scripts in the ``scripts/`` directory; the scripts call library
+functions documented in the :doc:`api`.
 
 All scripts read their configuration from ``config.yaml`` via
 ``config_versioned.Config``. See the individual script docstrings for the
 exact config keys each script uses.
 
----
+
+Prerequisites
+-------------
+
+**Python environment.** Install the conda env from ``environment.yml`` and
+the package itself in editable mode:
+
+.. code-block:: bash
+
+   make build_env       # conda env create -f environment.yml (env name: openpois)
+   conda activate openpois
+   make install_package # pip install -e .
+
+**Geofabrik OAuth (Pipeline 2 only).** Pipeline 2 downloads full-history
+PBFs from Geofabrik's OAuth-protected internal server. Any OSM account grants
+access. Generate a Netscape-format cookie jar by logging in at
+``https://osm-internal.download.geofabrik.de/`` and exporting cookies, or by
+running Geofabrik's ``oauth_cookie_client.py``. Save the cookie jar at the
+path configured in ``config.yaml`` under ``download.osm.history_cookie_file``.
+
+**Source Cooperative credentials (publishing only).** Publishing the data
+back to Source Cooperative requires short-lived AWS-style credentials in a
+JSON file at the path configured under ``publish.credentials_file`` (default:
+``.env.json`` at the repo root). The format is documented in the
+``scripts/publish/upload_to_source_coop.py`` docstring. Replicators who do
+not intend to publish can stop after Pipeline 4 Step 3.
+
+----
 
 Pipeline 1: POI Snapshot Downloads
-------------------------------------
+----------------------------------
 
 These two scripts are independent and can be run in any order (or in
 parallel). Each downloads a current US-wide POI snapshot from one data
@@ -51,27 +78,29 @@ See :mod:`openpois.io.overture`.
 Reads the first 100 rows of each snapshot without loading the full files,
 saving snippet CSVs to the ``testing/`` directory for column inspection.
 
----
+----
 
 Pipeline 2: OSM Historical Change-Rate Model
 --------------------------------------------
 
-This pipeline downloads OpenStreetMap element histories for a Seattle-area
-bounding box and fits a Poisson change-rate model to estimate how quickly
-different POI categories become outdated.
+This pipeline downloads OpenStreetMap full-history PBFs (US + Puerto Rico)
+and fits a Poisson change-rate model to estimate how quickly different POI
+categories become outdated.
 
-**Step 1 — Download OSM element histories**
+**Step 1 — Download full-history PBFs**
 
 .. code-block:: bash
 
-   python scripts/osm_data/download.py
+   python scripts/osm_data/download_history.py
 
-Queries the Overpass API across a configured date range to collect element IDs
-for each tag key, then fetches the full version history of each element via the
-OSM API. Outputs ``osm_elements.csv``, ``osm_versions.csv``,
-``osm_changes.csv``, and ``osm_failed_elements.csv``.
+Requires the Geofabrik OAuth cookie jar described in *Prerequisites* above.
+Downloads the US-mainland and Puerto Rico full-history extracts, filters
+each with ``osmium tags-filter`` (POI tag keys only) and ``osmium
+time-filter`` (the ``download.osm.start_date`` / ``end_date`` window), then
+parses with pyosmium into per-version and per-change Parquet tables.
+Outputs: ``osm_versions.parquet`` and ``osm_changes.parquet``.
 
-See :mod:`openpois.io.osm_history`.
+See :mod:`openpois.io.osm_history_pbf`.
 
 **Step 2 — Reformat into observations**
 
@@ -82,7 +111,7 @@ See :mod:`openpois.io.osm_history`.
 Converts raw version histories into one-row-per-observation records, each
 flagged for whether the configured ``osm_data.tag_key`` changed, then
 assigns a shared taxonomy label and explodes rows for POIs mapping to
-multiple labels. Output: ``osm_observations.csv``.
+multiple labels. Output: ``osm_observations.parquet``.
 
 See :mod:`openpois.osm.format_observations`.
 
@@ -111,10 +140,10 @@ Produces Kaplan-Meier-style survival curve plots saved to
 
 See :mod:`openpois.osm.change_plots`.
 
----
+----
 
 Pipeline 3: Rate the OSM Snapshot
-------------------------------------
+---------------------------------
 
 This pipeline applies the fitted change-rate model (Pipeline 2) to the OSM
 snapshot (Pipeline 1) to assign a confidence score to every POI.
@@ -141,31 +170,30 @@ See :mod:`openpois.models.apply`.
 
    python scripts/osm_snapshot/format_for_upload.py
 
-Adds geohash columns and writes a Hive-style partitioned dataset so that the
-web map can fetch only the tiles it needs. Output:
-``osm_snapshot_partitioned/``.
+Adds geohash columns and writes a Hive-style partitioned dataset so the web
+map can fetch only the tiles it needs. Output: ``osm_snapshot_partitioned/``.
 
 See :mod:`openpois.io.geohash_partition`.
 
-**Step 3 — Upload to S3**
+**Step 3 — Build OSM PMTiles**
 
 .. code-block:: bash
 
-   python scripts/osm_snapshot/upload_to_s3.py
+   python scripts/osm_snapshot/prepare_pmtiles.py
 
-Uploads the partitioned dataset to the configured public S3 bucket with
-public-read ACL. Requires AWS credentials (``AWS_ACCESS_KEY_ID`` /
-``AWS_SECRET_ACCESS_KEY`` env vars or ``~/.aws/credentials``).
+Generates a single-zoom (z14) PMTiles archive from the partitioned dataset
+for use by the web map. Output: ``osm_snapshot.pmtiles``.
 
-See :mod:`openpois.io.s3`.
+See :mod:`openpois.io.pmtiles`.
 
----
+----
 
-Pipeline 4: Conflation and Upload
-------------------------------------
+Pipeline 4: Conflation and Publishing
+-------------------------------------
 
-This pipeline conflates the rated OSM snapshot with the Overture Maps snapshot
-into a single unified POI dataset for the web map.
+This pipeline conflates the rated OSM snapshot with the Overture Maps
+snapshot into a single unified POI dataset and publishes it to Source
+Cooperative.
 
 **Prerequisites:** Pipeline 3 rated OSM snapshot and Pipeline 1 Overture
 snapshot.
@@ -193,23 +221,29 @@ See :mod:`openpois.conflation.match`, :mod:`openpois.conflation.merge`, and
 Produces a summary CSV with match counts and average match scores per
 shared taxonomy label. Output: ``summary_by_label.csv``.
 
-**Step 3 — Partition for upload**
+**Step 3 — Partition and build conflated PMTiles**
 
 .. code-block:: bash
 
    python scripts/conflation/format_for_upload.py
+   python scripts/conflation/prepare_pmtiles.py
 
-Adds geohash columns and writes a Hive-style partitioned dataset.
-Output: ``conflated_partitioned/``.
+Adds geohash columns and writes a Hive-style partitioned dataset, then
+builds a single-zoom (z14) PMTiles archive of the conflated points.
+Outputs: ``conflated_partitioned/`` and ``conflated.pmtiles``.
 
-See :mod:`openpois.io.geohash_partition`.
+See :mod:`openpois.io.geohash_partition` and :mod:`openpois.io.pmtiles`.
 
-**Step 4 — Upload to S3**
+**Step 4 — Publish to Source Cooperative** *(optional)*
 
 .. code-block:: bash
 
-   python scripts/conflation/upload_to_s3.py
+   python scripts/publish/upload_to_source_coop.py
 
-Uploads the partitioned conflated dataset to S3 with public-read ACL.
+Uploads the partitioned conflated dataset, the partitioned OSM dataset,
+both PMTiles archives, and a per-version README to Source Cooperative
+under the ``versions.source_coop`` folder. Requires the credentials file
+described in *Prerequisites*. Skip this step if you only want the data
+locally.
 
-See :mod:`openpois.io.s3`.
+See :mod:`openpois.io.source_coop` and :mod:`openpois.publish.build_readme`.

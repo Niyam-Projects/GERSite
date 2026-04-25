@@ -22,14 +22,6 @@ download:
   osm:
     start_date: 2016-01-01
     end_date: 2025-12-31
-    date_interval_days: 7
-    # Seattle-area bbox used only by the Overpass-based historical download.
-    # Overpass cannot serve US-wide histories; keep this scoped to a city.
-    history_bbox:
-      xmin: -122.45
-      ymin: 47.50
-      xmax: -122.25
-      ymax: 47.70
     pbf_url: "https://download.geofabrik.de/north-america/us-latest.osm.pbf"
     pr_pbf_url: "https://download.geofabrik.de/north-america/us/puerto-rico-latest.osm.pbf"
     # Full-history PBFs live on Geofabrik's OAuth-protected internal server.
@@ -156,9 +148,6 @@ directories:
       us_changes: us_osm_changes.parquet
       pr_versions: pr_osm_versions.parquet
       pr_changes: pr_osm_changes.parquet
-      # Legacy Overpass-based pipeline (still used by scripts/osm_data/download.py)
-      osm_elements: osm_elements.csv
-      osm_failed_elements: osm_failed_elements.csv
       # Modelling-ready observations (one row per POI version × shared_label)
       osm_observations: osm_observations.parquet
   model_output:
@@ -208,7 +197,6 @@ directories:
 
 # Settings for POI conflation
 conflation:
-  osm_confidence_weight: 0.8
   overture_confidence_weight: 0.7
   min_match_score: 0.50
   max_radius_m: 200

@@ -2,9 +2,8 @@
 Reformat raw OSM version histories into modelling-ready observations, tagged
 with a shared taxonomy label.
 
-Reads osm_versions.parquet and osm_changes.parquet (produced by either
-osm_data/download_history.py for US+PR or osm_data/download.py for a
-Seattle-scoped Overpass run). DuckDB streams them into an observation-per-
+Reads osm_versions.parquet and osm_changes.parquet (produced by
+osm_data/download_history.py). DuckDB streams them into an observation-per-
 version intermediate via ``format_observations_duckdb``. Each observation
 records the value of ``osm_data.tag_key`` (the change event — the tag whose
 add/change/delete fires ``changed=1``), timestamps of the previous tag
@@ -27,9 +26,8 @@ Config keys used (config.yaml):
                                     observation events (e.g. "name")
 
 Prerequisites:
-    Run osm_data/download_history.py (US+PR, PBF-based) or osm_data/download.py
-    (Seattle, Overpass-based) first to produce osm_versions.parquet and
-    osm_changes.parquet.
+    Run osm_data/download_history.py first to produce osm_versions.parquet
+    and osm_changes.parquet.
 
 Output file (in osm_data directory):
     osm_observations.parquet — one row per (POI version, shared_label). Columns:
