@@ -8,7 +8,7 @@ authors = [{ name = "Nathaniel Henry", email = "nat@henryspatialanalysis.com" }]
 description = "Open POI conflation between OpenStreetMap and Overture Maps"
 readme = "README.md"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3 :: Only",
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 requires-python = ">=3.10.0"
-dynamic = ["version"]
+version = "1.0.0"
 
 [project.urls]
 Documentation = "https://github.com/henryspatialanalysis/openpois"
