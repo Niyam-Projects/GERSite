@@ -158,7 +158,8 @@
       font-size: 14px;
     }
 
-    .conf-table th, .conf-table td {
+    .conf-table th,
+    .conf-table td {
       padding: 8px 12px;
     }
 
@@ -336,7 +337,7 @@
     </p>
     <p>
       <strong>Taxonomy normalization:</strong> Each source uses its own
-      category system. OpenPOIs maps all three to a shared set of ~50 labels
+      category system. OpenPOIs maps all three to a shared set of ~100 labels
       (e.g., Cafe, Bank, Pharmacy) using manually curated crosswalks. This
       shared taxonomy is used both for filtering in the web map and to set
       per-category match distances. See the full
@@ -365,25 +366,35 @@
       </thead>
       <tbody>
         <tr>
-          <td><div class="conf-swatch" style="background:#d73027;"></div></td>
+          <td>
+            <div class="conf-swatch" style="background:#d73027;"></div>
+          </td>
           <td>Low</td>
           <td>&lt; 30%</td>
           <td>Typically included in a single data source with low confidence</td>
         </tr>
         <tr>
-          <td><div class="conf-swatch" style="background:#fee08b;"></div></td>
+          <td>
+            <div class="conf-swatch" style="background:#fee08b;"></div>
+          </td>
           <td>Medium</td>
           <td>30% – 70%</td>
-          <td>Typically included in multiple data sources with low confidence, or a single data source with medium-high confidence</td>
+          <td>Typically included in multiple data sources with low confidence, or a single data source with medium-high
+            confidence</td>
         </tr>
         <tr>
-          <td><div class="conf-swatch" style="background:#a8c176;"></div></td>
+          <td>
+            <div class="conf-swatch" style="background:#a8c176;"></div>
+          </td>
           <td>High</td>
           <td>70% – 90%</td>
-          <td>Typically included in multiple data sources with medium confidence, or a single data source with high confidence</td>
+          <td>Typically included in multiple data sources with medium confidence, or a single data source with high
+            confidence</td>
         </tr>
         <tr>
-          <td><div class="conf-swatch" style="background:#1a9850;"></div></td>
+          <td>
+            <div class="conf-swatch" style="background:#1a9850;"></div>
+          </td>
           <td>Very high</td>
           <td>&gt; 90%</td>
           <td>Typically included in multiple data sources with high confidence</td>
@@ -393,20 +404,22 @@
 
     <h2>Data Access &amp; Licensing</h2>
     <p>
-      OpenStreetMap data is distributed under the
-      <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener noreferrer">
-        Open Database License (ODbL)</a>.
-      Because the conflated dataset incorporates OpenStreetMap, the combination
-      is also covered by ODbL. You are free to copy, distribute, and use the
-      data, provided that you attribute OpenStreetMap contributors and share
-      any derivative databases under the same license.
+      The raw snapshot and conflated Parquet files are publicly hosted on
+      <a href="https://source.coop/henryspatialanalysis/openpois" target="_blank" rel="noopener noreferrer">Source
+        Cooperative</a> and can be queried directly with pyarrow, DuckDB, or any tool that reads HTTPS Parquet.
     </p>
     <p>
-      The raw snapshot and conflated Parquet files are publicly hosted on
-      <a href="https://source.coop/henryspatialanalysis/openpois" target="_blank"
-        rel="noopener noreferrer">Source Cooperative</a> and can be queried
-      directly with pyarrow, DuckDB, or any tool that reads HTTPS Parquet.
+      The OpenPOIs dataset is released under the <a href="https://opendatacommons.org/licenses/odbl/">Open Database
+        License (ODbL)</a>. Any public use must credit OpenStreetMap contributors, the Overture Maps Foundation,
+      and OpenPOIs. Any derivative database must be shared under the same license.
     </p>
+    <p>
+      See the <a href="https://www.openstreetmap.org/copyright">OpenStreetMap copyright</a>
+      and <a href="https://docs.overturemaps.org/attribution/">Overture Maps attribution</a>
+      pages for more details about upstream attribution requirements.
+    </p>
+    </p>
+
     <h2>Python API Documentation</h2>
     <p>
       The <code>openpois</code> Python package provides modules for
