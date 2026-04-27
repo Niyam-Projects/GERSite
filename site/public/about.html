@@ -295,15 +295,9 @@
       OpenPOIs downloads current US-wide POI snapshots from multiple publicly
       available sources — currently OpenStreetMap and Overture Maps — and
       conflates them into a single unified dataset. The web map lets you
-      explore each source side by side, or view the conflated output with a
-      confidence score showing how well each POI is corroborated across
-      sources.
-    </p>
-    <p>
-      The project is also a Python library for modeling POI stability over
-      time using historical OpenStreetMap data. It fits an empirical Bayes
-      Poisson model to estimate per-category change rates, giving a sense of
-      how likely a given POI is to have changed since it was last observed.
+      explore each source side by side. Each POI in the conflated dataset is given a
+      confidence score, which is the probability that the POI currently exists
+      based on available data from both sources.
     </p>
 
     <h2>Data Sources</h2>
@@ -345,12 +339,14 @@
       <strong>Spatial matching:</strong> Within each shared-label group,
       nearby POIs from different sources are candidate matches. Match radii
       vary by category — a small neighborhood coffee shop uses a tighter
-      radius than a large hospital campus.
+      radius than a large hospital campus. Conflated POIs found in both OpenStreetMap and
+      Overture Maps are assigned a match score <i>(separate from the confidence score below)</i>,
+      indicating the probability of a true cross-source match.
     </p>
     <p>
       <strong>Confidence scoring:</strong> Each conflated POI receives a
       confidence score from 0 to 1, representing the estimated probability
-      that the POI is real and currently present.
+      that the POI currently exists.
     </p>
     <p>The confidence score is visualized on the map with a color ramp:</p>
     <table class="conf-table">
@@ -422,9 +418,14 @@
 
     <h2>Python API Documentation</h2>
     <p>
-      The <code>openpois</code> Python package provides modules for
-      downloading POI snapshots, conflating across sources, and modeling
-      historical POI change rates.
+      The <code>openpois</code> Python package powers this project. It provides modules for
+      downloading POI snapshots, conflating across sources, and modeling historical POI
+      change rates.
+    </p>
+    <p>
+      We fit an empirical Bayes Poisson model to estimate per-category change rates from
+      historical OpenStreetMap data, giving a sense of how likely a given POI is to have
+      changed since it was last observed. A full methods writeup is coming soon.
     </p>
     <a href="/docs/" class="docs-link">View Python API Docs &rarr;</a>
   </main>
