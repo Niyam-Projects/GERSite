@@ -47,6 +47,14 @@
     <div ref="popupEl">
       <PoiPopup :feature="selectedFeature" @close="closePopup" />
     </div>
+
+    <div class="map-attribution">
+      &copy;
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap<span class="attr-long"> contributors</span></a>,
+      <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">OpenMapTiles</a>,
+      <a href="https://overturemaps.org/" target="_blank" rel="noopener noreferrer">Overture Maps<span class="attr-long"> Foundation</span></a>,
+      <a href="https://openpois.org/about.html" target="_blank" rel="noopener noreferrer">OpenPOIs</a>
+    </div>
   </div>
 </template>
 

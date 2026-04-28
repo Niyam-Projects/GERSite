@@ -354,7 +354,7 @@ body,
 /* Amenity filter panel */
 .amenity-filter {
   position: absolute;
-  bottom: 8px;
+  bottom: 28px;
   right: 8px;
   z-index: 100;
   background: #fff;
@@ -362,6 +362,52 @@ body,
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   max-width: 220px;
+}
+
+@media (max-width: 450px) {
+  .amenity-filter { bottom: 50px; }
+}
+
+/* Hide OL's default attribution control — we render our own (.map-attribution) */
+.map-container .ol-attribution {
+  display: none;
+}
+
+/* Map attribution */
+.map-attribution {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  z-index: 100;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 3px 0 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #333;
+  max-width: calc(100% - 8px);
+  white-space: nowrap;
+}
+
+.map-attribution a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.map-attribution a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .map-attribution {
+    white-space: normal;
+    text-align: right;
+    max-width: calc(100% - 130px);
+  }
+}
+
+@media (max-width: 565px) {
+  .map-attribution .attr-long { display: none; }
 }
 
 .amenity-filter-header {
