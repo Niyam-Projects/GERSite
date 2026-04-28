@@ -128,9 +128,9 @@ onMounted(async () => {
   const osmLyr = getOsmLayer()
   const overtureLyr = getOvertureLayer()
   const conflatedLyr = getConflatedLayer()
-  osmLyr.setVisible(true)
-  overtureLyr.setVisible(false)
-  conflatedLyr.setVisible(false)
+  osmLyr.setVisible(props.activeSource === 'osm')
+  overtureLyr.setVisible(props.activeSource === 'overture')
+  conflatedLyr.setVisible(props.activeSource === 'conflated')
 
   const olMap = new Map({
     target: mapEl.value,
