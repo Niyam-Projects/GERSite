@@ -48,7 +48,7 @@ import {
   CONFLATED_LABELS,
 } from './constants.js'
 
-const activeSource = ref('osm')
+const activeSource = ref('conflated')
 const mapRef = ref(null)
 
 const osmFilters = ref(
