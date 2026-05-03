@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Saipan, CNMI",
+    "aoi_id": "saipan",
+    "note": "Main island of the Commonwealth of the Northern Mariana Islands. Smallest test AOI (~46 sq mi)."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [145.650, 15.060],
+        [145.880, 15.060],
+        [145.880, 15.320],
+        [145.650, 15.320],
+        [145.650, 15.060]
+      ]
+    ]
+  }
+}

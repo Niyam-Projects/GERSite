@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Miami-Dade County, FL",
+    "aoi_id": "miami_dade",
+    "note": "Large dense metro area in South Florida. ~2,431 sq mi. Stress-test AOI for spatial join performance."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-80.880, 25.130],
+        [-80.100, 25.130],
+        [-80.100, 25.980],
+        [-80.880, 25.980],
+        [-80.880, 25.130]
+      ]
+    ]
+  }
+}

@@ -2,8 +2,9 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
+# ── Legacy: openpois POI conflation package (keep until migration complete) ──
 [project]
-name = "openpois"
+name = "gersite"
 authors = [{ name = "Nathaniel Henry", email = "nat@henryspatialanalysis.com" }]
 description = "Open POI conflation between OpenStreetMap and Overture Maps"
 readme = "README.md"
@@ -20,6 +21,9 @@ classifiers = [
 ]
 requires-python = ">=3.10.0"
 version = "1.0.0"
+dependencies = [
+    "marimo>=0.23.4",
+]
 
 [project.urls]
 Documentation = "https://github.com/henryspatialanalysis/openpois"
@@ -33,6 +37,31 @@ where = ["src"]
 "config_versioned" = ["data/*.yaml", "data/*.csv"]
 "openpois" = ["conflation/data/*.csv"]
 "openpois.publish" = ["templates/*"]
+
+# ── GERSite: Building Conflation Pipeline (uv-managed) ──────────────────────
+# Install with:  uv sync
+# Run a flow:    uv run python flows/ingest_sources.py --aoi saipan
+# Open as notebook: uv run marimo edit flows/ingest_sources.py
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "flake8>=7.0",
+    "pylint>=3.0",
+]
+
+[project.optional-dependencies]
+gers = [
+    "duckdb>=1.4.0",
+    "pyarrow>=16.0",
+    "geopandas>=1.0",
+    "shapely>=2.0",
+    "h3>=4.0",
+    "marimo>=0.9.0",
+    "prefect>=3.0",
+    "pyyaml>=6.0",
+    "requests>=2.32",
+    "tqdm>=4.0",
+]
 
 [tool.black]
 line-length = 90
@@ -62,3 +91,4 @@ disable = [
 
 [tool.pylint.basic]
 good-names = ["L_prec", "i", "j", "k", "x", "y", "z", "f", "e", "t"]
+

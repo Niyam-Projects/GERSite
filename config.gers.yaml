@@ -1,0 +1,107 @@
+# GERSite Building Conflation Pipeline Configuration
+# Mirrors the pattern of config.yaml but scoped to the building pipeline.
+# All paths resolve via lib/duckdb_helpers.py StorageConfig.
+
+# Active version tags (bump each cycle)
+versions:
+  overture_release: null          # null = auto-detect latest from S3
+  bronze: "2026-04"               # YYYY-MM snapshot tag
+  silver: "2026-04"
+  gold: "2026-04"
+
+# Study-area AOIs — all flows accept --aoi <name>
+# Bboxes are [xmin, ymin, xmax, ymax] (lon/lat WGS84)
+aoi:
+  saipan:
+    label: "Saipan, CNMI"
+    bbox: [145.650, 15.060, 145.880, 15.320]
+    geojson: "aoi/saipan.geojson"
+  guam:
+    label: "Guam"
+    bbox: [144.560, 13.180, 145.000, 13.700]
+    geojson: "aoi/guam.geojson"
+  puerto_rico:
+    label: "Puerto Rico"
+    bbox: [-67.300, 17.870, -65.220, 18.520]
+    geojson: "aoi/puerto_rico.geojson"
+  miami_dade:
+    label: "Miami-Dade County, FL"
+    bbox: [-80.880, 25.130, -80.100, 25.980]
+    geojson: "aoi/miami_dade.geojson"
+
+# Local storage root — all bronze/silver/gold paths are relative to this.
+# Swap to an S3 prefix (e.g., s3://your-bucket/gers/) for cloud deployment.
+storage:
+  root: "~/data/gers"
+  bronze:
+    overture_buildings: "bronze/overture/buildings"     # partitioned by AOI
+    overture_osm_bridge: "bronze/overture/osm_bridge.parquet"  # staged, not yet active
+    fema_structures: "bronze/fema/structures"
+    nsi_structures: "bronze/nsi/structures"
+  silver:
+    fema_bridge: "silver/bridges/fema_bridge.parquet"
+    nsi_bridge: "silver/bridges/nsi_bridge.parquet"
+  gold:
+    buildings: "gold/buildings"                         # partitioned by AOI + H3
+
+# Overture S3 source (public, no auth required)
+overture:
+  s3_bucket: "overturemaps-us-west-2"
+  s3_region: "us-west-2"
+  theme: "buildings"
+  duckdb:
+    memory_limit: "4GB"
+    threads: 4
+    workers: 2
+
+# FEMA USA Structures (CC BY 4.0)
+fema:
+  # ArcGIS REST API bulk download — returns GeoJSON/Parquet
+  api_url: "https://services2.arcgis.com/FiaFA92sALCAMo9H/arcgis/rest/services/USA_Structures/FeatureServer/0/query"
+  # Alternatively use the S3 bulk download when available:
+  # s3_url: "s3://fema-open-data/usa-structures/latest/"
+  format: "geojson"
+
+# NSI — National Structure Inventory (USACE HEC, Public Domain)
+nsi:
+  # Point API — returns GeoJSON for a given bbox
+  api_url: "https://nsi.sec.usace.army.mil/nsiapi/structures"
+  format: "geojson"
+
+# DuckDB settings shared across all flows
+duckdb:
+  memory_limit: "8GB"
+  threads: 4
+
+# Spatial join thresholds
+bridges:
+  fema_min_iou: 0.10             # FEMA records with IoU < this → additive candidates
+  fema_high_iou: 0.80            # IoU threshold for High confidence score
+
+# Confidence scoring thresholds
+scoring:
+  high: 1.0     # Overture + FEMA, IoU >= fema_high_iou
+  medium: 0.6   # Overture only (no FEMA match)
+  low: 0.3      # FEMA only (additive candidate)
+
+# H3 partitioning for Gold layer output
+h3:
+  partition_resolution: 4        # ~111 km cell — coarse partition key
+  sort_resolution: 7             # ~1.2 km cell — within-partition row sort
+
+# Attribution metadata written to Gold layer Parquet file metadata
+attribution:
+  licenses:
+    - source: "Overture Maps Foundation"
+      license: "ODbL 1.0"
+      url: "https://docs.overturemaps.org/attribution/"
+    - source: "OpenStreetMap contributors"
+      license: "ODbL 1.0"
+      url: "https://www.openstreetmap.org/copyright"
+    - source: "FEMA USA Structures"
+      license: "CC BY 4.0"
+      url: "https://www.fema.gov/flood-maps/products-tools/products/building-data"
+    - source: "USACE National Structure Inventory"
+      license: "Public Domain"
+      url: "https://www.hec.usace.army.mil/confluence/nsi"
+  resultant_license: "ODbL 1.0"

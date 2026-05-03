@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Guam",
+    "aoi_id": "guam",
+    "note": "Unincorporated US territory in the western Pacific. ~212 sq mi."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [144.560, 13.180],
+        [145.000, 13.180],
+        [145.000, 13.700],
+        [144.560, 13.700],
+        [144.560, 13.180]
+      ]
+    ]
+  }
+}
