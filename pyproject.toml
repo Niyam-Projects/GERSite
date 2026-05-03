@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gersite"
-authors = [{ name = "Nathaniel Henry", email = "nat@henryspatialanalysis.com" }]
+authors = [
+    { name = "Troy Schmidt", email = "tschmidt@niyamit.com" },
+    { name = "NiyamIT, Inc." },
+]
 description = "GERSite building conflation pipeline (Overture + FEMA + NSI)"
 readme = "README.md"
 classifiers = [

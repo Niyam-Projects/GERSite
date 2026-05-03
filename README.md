@@ -1,13 +1,11 @@
 # GERSite — US Building Conflation Pipeline
 
+**Maintained by [NiyamIT, Inc.](https://niyamit.com) · Author: Troy Schmidt**
+
 **GERSite** conflates [Overture Maps](https://overturemaps.org) building footprints,
 [FEMA USA Structures](https://www.fema.gov/flood-maps/products-tools/products/building-data),
 and the [USACE National Structure Inventory (NSI)](https://www.hec.usace.army.mil/confluence/nsi)
 into a single confidence-scored Gold layer GeoParquet, partitioned by H3 cell.
-
-> **Note:** This repository is a fork of [henryspatialanalysis/openpois](https://github.com/henryspatialanalysis/openpois).
-> The original OpenPOI pipeline is preserved below and in `src/openpois/`. GERSite code lives
-> in `flows/`, `lib/`, `aoi/`, and `config.gers.yaml`.
 
 [![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](LICENSE)
 [![Data: ODbL](https://img.shields.io/badge/Data-ODbL%20v1.0-orange.svg)](https://opendatacommons.org/licenses/odbl/1-0/)
@@ -134,149 +132,40 @@ print(gdf["conflation_confidence"].value_counts())
 
 ---
 
-# OpenPOIs
+## Provenance & Credits
 
-A unified, confidence-scored open dataset of U.S. points of interest, built
-from [OpenStreetMap](https://www.openstreetmap.org) and
-[Overture Maps](https://overturemaps.org).
+**GERSite** was created by **Troy Schmidt** at **[NiyamIT, Inc.](https://niyamit.com)**.
 
-![OpenPOIs interactive map](docs/_static/hero.png)
+This project was inspired by the open-source [OpenPOIs](https://github.com/henryspatialanalysis/openpois)
+pipeline built by [Nathaniel Henry](https://github.com/henryspatialanalysis) at
+[Henry Spatial Analysis](https://github.com/henryspatialanalysis). The OpenPOIs framework
+introduced a rigorous, confidence-scored approach to conflating multiple open geospatial
+datasets into a unified Gold layer — and that approach directly inspired GERSite's adaptation
+of the same methodology for US building footprints, fusing Overture Maps, FEMA USA Structures,
+and the USACE National Structure Inventory. We are grateful to Nathaniel Henry and Henry Spatial
+Analysis for making that foundational work available under an open-source license.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Data: ODbL](https://img.shields.io/badge/Data-ODbL%20v1.0-orange.svg)](https://opendatacommons.org/licenses/odbl/1-0/)
-[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](pyproject.toml)
-[![Site deploy](https://github.com/henryspatialanalysis/openpois/actions/workflows/deploy-site.yml/badge.svg)](https://github.com/henryspatialanalysis/openpois/actions/workflows/deploy-site.yml)
+### Data Source Attribution
 
-- 🌐 **Live map:** <https://openpois.org>
-- 📘 **Python API docs:** <https://openpois.org/docs/>
-- 🗄️ **Dataset on Source Cooperative:** <https://source.coop/henryspatialanalysis/openpois>
+| Dataset | Provider | License |
+|---|---|---|
+| [Overture Maps Buildings](https://overturemaps.org) | Overture Maps Foundation | ODbL v1.0 |
+| [USA Structures](https://www.fema.gov/flood-maps/products-tools/products/building-data) | FEMA | Public Domain |
+| [National Structure Inventory (NSI)](https://www.hec.usace.army.mil/confluence/nsi) | USACE | Public Domain |
 
+### Licensing
 
-## What is OpenPOIs?
-
-OpenPOIs conflates points of interest from OpenStreetMap and Overture Maps
-into a single unified dataset, then attaches a per-POI confidence score
-estimating the probability that the place still exists. Confidence comes from
-a Bayesian turnover model fit on OSM tag-edit history. The published dataset
-covers the United States and is refreshed monthly, following the Overture Maps monthly release cycle.
-
-This repository contains the Python library used to produce the data, the
-end-to-end pipelines that download and conflate sources, and the Vue
-front-end that powers the live map.
-
-
-## Quickstart — read the data
-
-No install required. The dataset is hosted anonymously on Source Cooperative;
-read it straight from S3:
-
-```python
-import pyarrow.dataset as ds
-import pyarrow.fs as pafs
-
-BASE = "us-west-2.opendata.source.coop/henryspatialanalysis/openpois"
-VERSION = "latest"   # or pin a dated folder, e.g. "2026-04-23-v0"
-
-fs = pafs.S3FileSystem(anonymous = True, region = "us-west-2")
-pois = ds.dataset(
-    f"{BASE}/{VERSION}/conflated-parquet/",
-    filesystem = fs,
-    format = "parquet",
-    partitioning = "hive",
-)
-print(pois.schema)
-print(f"{pois.count_rows():,} POIs")
-```
-
-GeoPandas, DuckDB, and PMTiles examples live in the
-[dataset README on Source Cooperative](https://source.coop/henryspatialanalysis/openpois).
-
-
-## Python package
-
-The full OpenPOIs package API — I/O adapters, the turnover model, conflation
-primitives — is documented at <https://openpois.org/docs/>.
-
-### Installation
-
-This package can be installed from source:
-
-```bash
-git clone https://github.com/henryspatialanalysis/openpois.git
-cd openpois
-just conda-create        # conda env from environment.yml
-conda activate openpois
-uv sync                  # install package + dev deps
-```
-
-### Repository layout
-
-| Path | Purpose |
-|---|---|
-| [src/openpois/](src/openpois/) | Library source: I/O, models, conflation, publishing |
-| [scripts/](scripts/) | End-to-end pipelines using `config.yaml` |
-| [site/](site/) | Vue 3 + Vite frontend powering openpois.org |
-| [docs/](docs/) | Sphinx documentation source |
-| [tests/](tests/) | Unit tests |
-
-### Reproduce the dataset yourself
-
-The data is produced by four pipelines under [scripts/](scripts/), each
-driven by [config.yaml](config.yaml):
-
-1. Snapshot downloads (OSM + Overture)
-2. OSM history download and Bayesian turnover-model fit
-3. Apply model to OSM snapshot to get per-POI confidence
-4. Conflate OSM × Overture, partition, publish to Source Cooperative
-
-Each pipeline and its scripts are documented in the workflows reference at
-<https://openpois.org/docs/workflows.html>.
-
-### Web map
-
-The interactive map at <https://openpois.org> is a Vue 3 + Vite app rendering
-PMTiles archives over MapLibre GL. To run it locally:
-
-```bash
-just site-dev      # http://localhost:5173, hot reload
-just site-build    # production build to site/dist/
-```
-
-The site auto-deploys to GitHub Pages via
-[.github/workflows/deploy-site.yml](.github/workflows/deploy-site.yml) on
-every push to `main` that touches `site/`, `src/`, `docs/`, or `scripts/`.
-
-### Development
-
-```bash
-just test           # run the test suite
-just lint           # flake8 + pylint
-just conda-export   # rewrite environment.yml after adding deps
-```
-
-## Licensing
-
-OpenPOIs is dual-licensed:
+GERSite is dual-licensed:
 
 - **Code** — [MIT License](LICENSE). You can use, modify, and redistribute the
-  Python package, scripts, and front-end freely.
+  pipeline and library freely.
 - **Data** — [Open Database License (ODbL) v1.0](https://opendatacommons.org/licenses/odbl/1-0/).
-  The published parquet and PMTiles archives are derivative works of
-  OpenStreetMap and Overture Maps and inherit ODbL terms. Any public use must
-  attribute OpenPOIs, [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
-  and the [Overture Maps Foundation](https://docs.overturemaps.org/attribution/).
+  Output datasets are derivative works of Overture Maps and inherit ODbL terms. Any public use
+  must attribute GERSite and the
+  [Overture Maps Foundation](https://docs.overturemaps.org/attribution/).
   Derivative databases must be released under the same license.
 
-## Citation
-
-If you use OpenPOIs in research, please cite:
-
-> Henry, N. (2026). *OpenPOIs: a unified, confidence-scored dataset of U.S. points of interest.* Henry Spatial Analysis. <https://openpois.org>
-
-A machine-readable citation is provided in [CITATION.cff](CITATION.cff);
-GitHub renders it as a "Cite this repository" button on the repo home page.
-
-## Contact
+### Contact
 
 Bug reports, feature requests, and contributions are welcome via
-[GitHub issues](https://github.com/henryspatialanalysis/openpois/issues).
+[GitHub issues](https://github.com/Niyam-Projects/GERSite/issues).
