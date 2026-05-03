@@ -40,10 +40,10 @@ def get_connection(
         Configured DuckDB connection.
     """
     con = duckdb.connect(database=":memory:", read_only=read_only)
-    con.execute(f"SET memory_limit='{memory_limit}'")
-    con.execute(f"SET threads={threads}")
-    con.execute("INSTALL spatial; LOAD spatial")
-    con.execute("INSTALL httpfs; LOAD httpfs")
+    con.sql(f"SET memory_limit='{memory_limit}'")
+    con.sql(f"SET threads={threads}")
+    con.sql("INSTALL spatial; LOAD spatial")
+    con.sql("INSTALL httpfs; LOAD httpfs")
     return con
 
 
@@ -70,6 +70,7 @@ class StorageConfig:
     bronze: dict = field(default_factory=dict)
     silver: dict = field(default_factory=dict)
     gold: dict = field(default_factory=dict)
+    tiles: dict = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, config_path: str | Path = "config.gers.yaml") -> "StorageConfig":
@@ -83,6 +84,7 @@ class StorageConfig:
             bronze=storage.get("bronze", {}),
             silver=storage.get("silver", {}),
             gold=storage.get("gold", {}),
+            tiles=storage.get("tiles", {}),
         )
 
     def resolve(self, *parts: str) -> str:
@@ -112,6 +114,18 @@ class StorageConfig:
             aoi: Optional AOI name to append as a sub-directory.
         """
         base = self.resolve(self.gold[key])
+        if aoi:
+            return f"{base}/{aoi}"
+        return base
+
+    def tiles_path(self, key: str, aoi: Optional[str] = None) -> str:
+        """Resolve a named tiles sub-path, optionally scoped to an AOI.
+
+        Args:
+            key: Config key under storage.tiles (e.g. 'gold_buildings').
+            aoi: Optional AOI name to append as a sub-directory.
+        """
+        base = self.resolve(self.tiles[key])
         if aoi:
             return f"{base}/{aoi}"
         return base

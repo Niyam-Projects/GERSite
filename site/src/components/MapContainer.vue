@@ -10,10 +10,6 @@
       <span class="material-symbols-outlined">my_location</span>
     </button>
 
-    <ConfidenceLegend
-      v-if="props.activeSource === 'osm' || props.activeSource === 'overture' || props.activeSource === 'conflated'"
-    />
-
     <!-- Desktop: native select -->
     <div class="basemap-switcher basemap-switcher-desktop">
       <select v-model="selectedStyle" @change="switchBaseMap">
@@ -45,7 +41,7 @@
 
     <!-- Popup overlay anchor (managed by OL Overlay, not Vue v-if) -->
     <div ref="popupEl">
-      <PoiPopup :feature="selectedFeature" @close="closePopup" />
+      <BuildingPopup :feature="selectedFeature" @close="closePopup" />
     </div>
 
     <div class="map-attribution">
@@ -53,7 +49,8 @@
       <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap<span class="attr-long"> contributors</span></a>,
       <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">OpenMapTiles</a>,
       <a href="https://overturemaps.org/" target="_blank" rel="noopener noreferrer">Overture Maps<span class="attr-long"> Foundation</span></a>,
-      <a href="https://openpois.org/about.html" target="_blank" rel="noopener noreferrer">OpenPOIs</a>
+      <a href="https://www.fema.gov/flood-maps/national-flood-hazard-layer" target="_blank" rel="noopener noreferrer">FEMA USA Structures</a>,
+      <a href="https://www.nsi.usace.army.mil/" target="_blank" rel="noopener noreferrer">USACE NSI</a>
     </div>
   </div>
 </template>
@@ -67,24 +64,12 @@ import View from 'ol/View'
 import Overlay from 'ol/Overlay'
 import { fromLonLat, transformExtent } from 'ol/proj'
 import { apply } from 'ol-mapbox-style'
-import PoiPopup from './PoiPopup.vue'
-import ConfidenceLegend from './ConfidenceLegend.vue'
+import BuildingPopup from './BuildingPopup.vue'
 import { useGeolocation } from '../composables/useGeolocation.js'
-import {
-  getOsmLayer,
-  updateOsmFilters,
-  wrapOsmFeature,
-} from '../layers/osmLayer.js'
-import {
-  getOvertureLayer,
-  updateOvertureFilters,
-  wrapOvertureFeature,
-} from '../layers/overtureLayer.js'
-import {
-  getConflatedLayer,
-  updateConflatedFilters,
-  wrapConflatedFeature,
-} from '../layers/conflatedLayer.js'
+import { getGoldBuildingsLayer, updateGoldFilters, wrapGoldFeature }           from '../layers/goldBuildingsLayer.js'
+import { getFemaBuildingsLayer, updateFemaFilters, wrapFemaFeature }            from '../layers/femaBuildingsLayer.js'
+import { getOvertureBuildingsLayer, wrapOvertureBuildingFeature }               from '../layers/overtureBuildingsLayer.js'
+import { getNsiUnmatchedLayer, wrapNsiUnmatchedFeature }                        from '../layers/nsiUnmatchedLayer.js'
 import {
   BASE_MAP_STYLES,
   INITIAL_CENTER,
@@ -93,10 +78,10 @@ import {
 } from '../constants.js'
 
 const props = defineProps({
-  activeSource: { type: String, required: true },
-  osmFilters: { type: Object, required: true },
-  overtureFilters: { type: Object, required: true },
-  conflatedFilters: { type: Object, required: true },
+  activeSource:        { type: String,  required: true },  // 'gold' | 'fema' | 'overture'
+  goldFilters:         { type: Object,  required: true },
+  femaFilters:         { type: Object,  required: true },
+  nsiUnmatchedVisible: { type: Boolean, default: false },
 })
 
 const mapEl = ref(null)
@@ -115,7 +100,7 @@ let geocodeMarker = null
 
 // Helper: get all data layers
 function getDataLayers() {
-  return [getOsmLayer(), getOvertureLayer(), getConflatedLayer()]
+  return [getGoldBuildingsLayer(), getFemaBuildingsLayer(), getOvertureBuildingsLayer(), getNsiUnmatchedLayer()]
 }
 
 onMounted(async () => {
@@ -125,17 +110,19 @@ onMounted(async () => {
     minZoom: MIN_ZOOM,
   })
 
-  const osmLyr = getOsmLayer()
-  const overtureLyr = getOvertureLayer()
-  const conflatedLyr = getConflatedLayer()
-  osmLyr.setVisible(props.activeSource === 'osm')
+  const goldLyr     = getGoldBuildingsLayer()
+  const femaLyr     = getFemaBuildingsLayer()
+  const overtureLyr = getOvertureBuildingsLayer()
+  const nsiLyr      = getNsiUnmatchedLayer()
+  goldLyr.setVisible(props.activeSource === 'gold')
+  femaLyr.setVisible(props.activeSource === 'fema')
   overtureLyr.setVisible(props.activeSource === 'overture')
-  conflatedLyr.setVisible(props.activeSource === 'conflated')
+  nsiLyr.setVisible(props.nsiUnmatchedVisible)
 
   const olMap = new Map({
     target: mapEl.value,
     view,
-    layers: [osmLyr, overtureLyr, conflatedLyr],
+    layers: [goldLyr, femaLyr, overtureLyr, nsiLyr],
   })
   map.value = olMap
 
@@ -157,9 +144,8 @@ onMounted(async () => {
   olMap.on('singleclick', handleClick)
 
   // Initialise PMTiles filters from props
-  updateOsmFilters(props.osmFilters)
-  updateOvertureFilters(props.overtureFilters)
-  updateConflatedFilters(props.conflatedFilters)
+  updateGoldFilters(props.goldFilters)
+  updateFemaFilters(props.femaFilters)
 
   handleGeolocate()
 })
@@ -221,22 +207,13 @@ function handleClick(evt) {
   closePopup()
 
   map.value.forEachFeatureAtPixel(evt.pixel, (feature, lyr) => {
-    // All three data layers are now VectorTile/PMTiles. Route through the
-    // matching wrapper so PoiPopup gets a plain OL-Feature-ish object.
     let wrapped = null
-    if (lyr === getOsmLayer()) {
-      wrapped = wrapOsmFeature(feature)
-    } else if (lyr === getOvertureLayer()) {
-      wrapped = wrapOvertureFeature(feature)
-    } else if (lyr === getConflatedLayer()) {
-      wrapped = wrapConflatedFeature(feature)
-    }
+    if (lyr === getGoldBuildingsLayer())          wrapped = wrapGoldFeature(feature)
+    else if (lyr === getFemaBuildingsLayer())      wrapped = wrapFemaFeature(feature)
+    else if (lyr === getOvertureBuildingsLayer())  wrapped = wrapOvertureBuildingFeature(feature)
+    else if (lyr === getNsiUnmatchedLayer())       wrapped = wrapNsiUnmatchedFeature(feature)
     if (!wrapped) return false
 
-    // VectorTile RenderFeatures expose getType() but only getFlatCoordinates(),
-    // not the full-Feature getCoordinates(). Anchoring the popup to the
-    // click location sidesteps the API mismatch and matches the long-standing
-    // Overture handler behaviour.
     selectedFeature.value = wrapped
     popupOverlay.value.setPosition(evt.coordinate)
     return true
@@ -313,29 +290,19 @@ defineExpose({ flyToBbox })
 
 // ---- Watchers ----
 
+// Source visibility watcher — NSI stays independent
 watch(() => props.activeSource, (src) => {
-  getOsmLayer().setVisible(src === 'osm')
-  getOvertureLayer().setVisible(src === 'overture')
-  getConflatedLayer().setVisible(src === 'conflated')
+  getGoldBuildingsLayer().setVisible(src === 'gold')
+  getFemaBuildingsLayer().setVisible(src === 'fema')
+  getOvertureBuildingsLayer().setVisible(src === 'overture')
   closePopup()
 })
 
-watch(
-  () => props.osmFilters,
-  (filters) => { updateOsmFilters(filters) },
-  { deep: true }
-)
+watch(() => props.nsiUnmatchedVisible, (v) => {
+  getNsiUnmatchedLayer().setVisible(v)
+})
 
-watch(
-  () => props.overtureFilters,
-  (filters) => { updateOvertureFilters(filters) },
-  { deep: true }
-)
-
-watch(
-  () => props.conflatedFilters,
-  (filters) => { updateConflatedFilters(filters) },
-  { deep: true }
-)
+watch(() => props.goldFilters, (f) => { updateGoldFilters(f) }, { deep: true })
+watch(() => props.femaFilters, (f) => { updateFemaFilters(f) }, { deep: true })
 
 </script>

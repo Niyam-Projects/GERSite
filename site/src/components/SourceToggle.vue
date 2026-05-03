@@ -5,38 +5,48 @@
     :value="activeSource"
     @change="$emit('update:source', $event.target.value)"
   >
-    <option value="osm">OpenStreetMap</option>
-    <option value="overture">Overture Maps</option>
-    <option value="conflated">Conflated</option>
+    <option value="gold">Gold Buildings</option>
+    <option value="fema">FEMA</option>
+    <option value="overture">Overture</option>
   </select>
 
   <!-- Buttons for wider screens -->
   <div class="source-toggle">
     <button
-      :class="{ active: activeSource === 'osm' }"
-      @click="$emit('update:source', 'osm')"
+      :class="{ active: activeSource === 'gold' }"
+      @click="$emit('update:source', 'gold')"
     >
-      <span class="osm-short">OSM</span>
-      <span class="osm-long">OpenStreetMap</span>
+      Gold Buildings
+    </button>
+    <button
+      :class="{ active: activeSource === 'fema' }"
+      @click="$emit('update:source', 'fema')"
+    >
+      FEMA
     </button>
     <button
       :class="{ active: activeSource === 'overture' }"
       @click="$emit('update:source', 'overture')"
     >
-      Overture<span class="overture-suffix"> Maps</span>
-    </button>
-    <button
-      :class="{ active: activeSource === 'conflated' }"
-      @click="$emit('update:source', 'conflated')"
-    >
-      Conflated
+      Overture
     </button>
   </div>
+
+  <!-- NSI overlay toggle (always visible) -->
+  <label class="nsi-toggle">
+    <input
+      type="checkbox"
+      :checked="nsiUnmatchedVisible"
+      @change="$emit('update:nsi-visible', $event.target.checked)"
+    />
+    NSI Points
+  </label>
 </template>
 
 <script setup>
 defineProps({
   activeSource: { type: String, required: true },
+  nsiUnmatchedVisible: { type: Boolean, required: true },
 })
-defineEmits(['update:source'])
+defineEmits(['update:source', 'update:nsi-visible'])
 </script>

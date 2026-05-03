@@ -1,71 +1,44 @@
-// Taxonomy arrays are generated from the conflation CSVs by
-// scripts/build_taxonomy.py. Only the display-label maps below are
-// hand-maintained. Run `python scripts/check_taxonomy_sync.py` to detect drift.
-import {
-  SHARED_LABELS,
-  OSM_KEYS,
-  OVERTURE_L0S,
-} from './taxonomy.generated.js'
+// PMTiles URLs — served locally by the Vite dev server middleware (vite.config.js).
+// For production deployment, replace with public HTTP URLs (e.g., Source Cooperative).
+export const GOLD_BUILDINGS_PMTILES_URL = '/tiles/gold_buildings/miami_dade/buildings.pmtiles'
+export const FEMA_BUILDINGS_PMTILES_URL = '/tiles/fema_buildings/miami_dade/fema.pmtiles'
+export const NSI_UNMATCHED_PMTILES_URL  = '/tiles/nsi_unmatched/miami_dade/nsi_unmatched.pmtiles'
 
-// Source Cooperative URLs — PMTiles archives read via ol-pmtiles. Bump the
-// version folder each refresh to match `versions.source_coop` in config.yaml.
-export const OSM_PMTILES_URL =
-  'https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/osm-pmtiles/osm.pmtiles'
+// Overture buildings — hosted monthly release (update URL each release cycle)
+export const OVERTURE_BUILDINGS_PMTILES_URL =
+  'https://tiles.overturemaps.org/2026-04-15.0/buildings.pmtiles'
 
-export const CONFLATED_PMTILES_URL =
-  'https://data.source.coop/henryspatialanalysis/openpois/2026-04-23-v0/conflated-pmtiles/conflated.pmtiles'
+// Canonical FEMA OCC_CLS occupancy categories (used as filter options for
+// both the Gold layer general_occupancy field and the FEMA OCC_CLS field).
+export const OCCUPANCY_TYPES = [
+  'Residential',
+  'Commercial',
+  'Industrial',
+  'Agriculture',
+  'Religion',
+  'Government',
+  'Education',
+]
 
-// Overture PMTiles (latest release — update URL on each Overture monthly release)
-export const OVERTURE_PMTILES_URL =
-  'https://tiles.overturemaps.org/2026-04-15.0/places.pmtiles'
+// Occupancy type color palette (Tableau 10 — colorblind-distinguishable)
+export const OCCUPANCY_COLORS = {
+  Residential: '#4e79a7',
+  Commercial:  '#f28e2b',
+  Industrial:  '#e15759',
+  Agriculture: '#76b7b2',
+  Religion:    '#59a14f',
+  Government:  '#edc948',
+  Education:   '#b07aa1',
+  _unknown:    '#aaaaaa',  // fallback for unclassified features
+}
 
-// Confidence color ramp (conf_mean 0-1, 1 = stable)
+// Keep non-occupancy colors used by other layers
 export const COLORS = {
-  low: '#d73027',      // red, conf < 0.3
-  medium: '#fee08b',   // yellow, conf 0.3-0.7
-  high: '#1a9850',     // green, conf > 0.7
-  cluster: '#6366f1',  // indigo for clusters
-  geolocation: '#60a5fa', // light blue dot
+  nsi:      '#f28e2b',  // orange — NSI unmatched points
+  overture: '#76b7b2',  // teal   — Overture buildings
 }
 
 export const CONFIDENCE_THRESHOLDS = { low: 0.3, high: 0.7 }
-
-const OSM_KEY_LABELS = {
-  amenity: 'Amenity',
-  shop: 'Shop',
-  leisure: 'Leisure',
-  healthcare: 'Healthcare',
-  craft: 'Craft',
-  historic: 'Historic',
-  landuse: 'Landuse',
-  office: 'Office',
-  tourism: 'Tourism',
-}
-
-const OVERTURE_L0_LABELS = {
-  food_and_drink: 'Food & Drink',
-  shopping: 'Shopping',
-  arts_and_entertainment: 'Arts & Entertainment',
-  sports_and_recreation: 'Sports & Recreation',
-  health_care: 'Health Care',
-  services_and_business: 'Services & Business',
-  lifestyle_services: 'Lifestyle Services',
-  community_and_government: 'Community & Government',
-  cultural_and_historic: 'Cultural & Historic',
-  education: 'Education',
-  travel_and_transportation: 'Travel & Transportation',
-  lodging: 'Lodging',
-}
-
-export const OSM_FILTER_KEYS = OSM_KEYS.map(key => ({
-  key,
-  label: OSM_KEY_LABELS[key] ?? key,
-}))
-
-export const OVERTURE_CATEGORIES = OVERTURE_L0S.map(key => ({
-  key,
-  label: OVERTURE_L0_LABELS[key] ?? key,
-}))
 
 // OpenFreeMap base map styles
 export const BASE_MAP_STYLES = [
@@ -86,19 +59,11 @@ export const BASE_MAP_STYLES = [
   },
 ]
 
-// Conflated shared_label categories — generated from match_radii.csv.
-// "Other *" entries are sorted last; App.vue uses that convention to leave
-// them unchecked by default.
-export const CONFLATED_LABELS = SHARED_LABELS
-
-// Zoom thresholds — PMTiles min_zoom (site can't zoom out below this).
-// Points above z14 are rendered via ol-pmtiles over-zoom.
-export const MIN_ZOOM = 14
+// Zoom thresholds
+export const MIN_ZOOM = 10
+export const INITIAL_CENTER = [-80.1918, 25.7617]  // Miami, FL
+export const INITIAL_ZOOM = 14
 
 // Stadia Maps Geocoding
-export const STADIA_GEOCODING_URL =
-  'https://api.stadiamaps.com/geocoding/v1/search'
+export const STADIA_GEOCODING_URL = 'https://api.stadiamaps.com/geocoding/v1/search'
 
-// Initial map view — Times Square (fallback if geolocation is denied)
-export const INITIAL_CENTER = [-73.9855, 40.758]
-export const INITIAL_ZOOM = 18

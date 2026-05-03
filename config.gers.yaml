@@ -32,17 +32,23 @@ aoi:
 # Local storage root — all bronze/silver/gold paths are relative to this.
 # Swap to an S3 prefix (e.g., s3://your-bucket/gers/) for cloud deployment.
 storage:
-  root: "~/data/gers"
+  root: "E:/gersite/data"
   bronze:
     overture_buildings: "bronze/overture/buildings"     # partitioned by AOI
-    overture_osm_bridge: "bronze/overture/osm_bridge.parquet"  # staged, not yet active
+    overture_osm_bridge: "bronze/overture/osm_bridge"          # partitioned by AOI
     fema_structures: "bronze/fema/structures"
     nsi_structures: "bronze/nsi/structures"
   silver:
     fema_bridge: "silver/bridges/fema_bridge.parquet"
     nsi_bridge: "silver/bridges/nsi_bridge.parquet"
+    nsi_fema_bridge: "silver/bridges/nsi_fema_bridge.parquet"
   gold:
     buildings: "gold/buildings"                         # partitioned by AOI + H3
+    nsi_review: "gold/nsi_review"                       # NSI structures with no footprint match
+  tiles:
+    gold_buildings: "tiles/gold_buildings"              # PMTiles per AOI (gold layer)
+    fema_buildings: "tiles/fema_buildings"              # PMTiles per AOI (FEMA bronze)
+    nsi_unmatched:  "tiles/nsi_unmatched"               # PMTiles per AOI (NSI unmatched points)
 
 # Overture S3 source (public, no auth required)
 overture:
@@ -56,17 +62,15 @@ overture:
 
 # FEMA USA Structures (CC BY 4.0)
 fema:
-  # ArcGIS REST API bulk download — returns GeoJSON/Parquet
-  api_url: "https://services2.arcgis.com/FiaFA92sALCAMo9H/arcgis/rest/services/USA_Structures/FeatureServer/0/query"
-  # Alternatively use the S3 bulk download when available:
-  # s3_url: "s3://fema-open-data/usa-structures/latest/"
-  format: "geojson"
+  # Per-state zipped File Geodatabase downloads from the FEMA GDB download site.
+  # The index page is scraped at runtime to resolve the current dated S3 URLs.
+  download_index_url: "https://disasters.geoplatform.gov/USA_Structures/"
+  format: "gdb"
 
 # NSI — National Structure Inventory (USACE HEC, Public Domain)
 nsi:
-  # Point API — returns GeoJSON for a given bbox
-  api_url: "https://nsi.sec.usace.army.mil/nsiapi/structures"
-  format: "geojson"
+  # Per-state GeoPackage zip downloads; FIPS code is appended at runtime
+  download_base_url: "https://nsi.sec.usace.army.mil/downloads/nsi_2022"
 
 # DuckDB settings shared across all flows
 duckdb:

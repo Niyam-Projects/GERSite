@@ -167,7 +167,6 @@ dependencies:
   - sqlite=3.51.2
   - statsmodels=0.14.6
   - threadpoolctl=3.6.0
-  - tippecanoe=2.79.0
   - tk=8.6.13
   - tqdm=4.67.3
   - tzdata=2025c

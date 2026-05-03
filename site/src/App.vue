@@ -2,7 +2,9 @@
   <div class="top-bar">
     <SourceToggle
       :active-source="activeSource"
+      :nsi-unmatched-visible="nsiUnmatchedVisible"
       @update:source="setSource"
+      @update:nsi-visible="nsiUnmatchedVisible = $event"
     />
     <SearchBar @fly-to="handleFlyTo" />
     <div class="top-bar-right">
@@ -20,19 +22,16 @@
   <MapContainer
     ref="mapRef"
     :active-source="activeSource"
-    :osm-filters="osmFilters"
-    :overture-filters="overtureFilters"
-    :conflated-filters="conflatedFilters"
+    :gold-filters="goldFilters"
+    :fema-filters="femaFilters"
+    :nsi-unmatched-visible="nsiUnmatchedVisible"
   />
-  <AmenityFilter
+  <OccupancyFilter
     :active-source="activeSource"
-    :osm-filters="osmFilters"
-    :overture-filters="overtureFilters"
-    :conflated-filters="conflatedFilters"
-    :conflated-labels="CONFLATED_LABELS"
-    @update:osm-filters="osmFilters = $event"
-    @update:overture-filters="overtureFilters = $event"
-    @update:conflated-filters="conflatedFilters = $event"
+    :gold-filters="goldFilters"
+    :fema-filters="femaFilters"
+    @update:gold-filters="goldFilters = $event"
+    @update:fema-filters="femaFilters = $event"
   />
 </template>
 
@@ -41,28 +40,15 @@ import { ref } from 'vue'
 import SourceToggle from './components/SourceToggle.vue'
 import SearchBar from './components/SearchBar.vue'
 import MapContainer from './components/MapContainer.vue'
-import AmenityFilter from './components/AmenityFilter.vue'
-import {
-  OSM_FILTER_KEYS,
-  OVERTURE_CATEGORIES,
-  CONFLATED_LABELS,
-} from './constants.js'
+import OccupancyFilter from './components/OccupancyFilter.vue'
+import { OCCUPANCY_TYPES } from './constants.js'
 
-const activeSource = ref('conflated')
+const activeSource = ref('gold')
+const nsiUnmatchedVisible = ref(false)
 const mapRef = ref(null)
 
-const osmFilters = ref(
-  OSM_FILTER_KEYS.reduce((acc, f) => ({ ...acc, [f.key]: true }), {})
-)
-const overtureFilters = ref(
-  OVERTURE_CATEGORIES.reduce((acc, c) => ({ ...acc, [c.key]: true }), {})
-)
-const conflatedFilters = ref(
-  CONFLATED_LABELS.reduce((acc, lbl) => ({
-    ...acc,
-    [lbl]: !lbl.startsWith('Other '),
-  }), {})
-)
+const goldFilters = ref(OCCUPANCY_TYPES.reduce((acc, t) => ({ ...acc, [t]: true }), {}))
+const femaFilters = ref(OCCUPANCY_TYPES.reduce((acc, t) => ({ ...acc, [t]: true }), {}))
 
 function setSource(src) {
   activeSource.value = src

@@ -26,6 +26,7 @@ Config keys used (config.gers.yaml):
 
 import marimo
 
+__generated_with = "0.23.4"
 app = marimo.App(width="medium")
 
 
@@ -57,14 +58,23 @@ def _setup():
 
     mo.md("## Flow 2: Generate Bridges")
     return (
-        CFG, CONFIG_PATH, LIB_PATH, REPO_ROOT, STORAGE, AOI_CHOICES,
-        Path, duckdb, flow, get_run_logger, mo, sys, task, yaml,
-        StorageConfig, get_connection, compute_iou_sql,
+        AOI_CHOICES,
+        CFG,
+        Path,
+        STORAGE,
+        StorageConfig,
+        compute_iou_sql,
+        flow,
+        get_connection,
+        get_run_logger,
+        mo,
+        sys,
+        task,
     )
 
 
 @app.cell
-def _aoi_selector(mo, AOI_CHOICES):
+def _aoi_selector(AOI_CHOICES, mo):
     """AOI selection."""
     aoi_dropdown = mo.ui.dropdown(
         options=AOI_CHOICES,
@@ -76,7 +86,7 @@ def _aoi_selector(mo, AOI_CHOICES):
 
 
 @app.cell
-def _resolve_aoi(aoi_dropdown, CFG, mo, sys):
+def _resolve_aoi(CFG, aoi_dropdown, mo, sys):
     """Resolve AOI from UI or --aoi CLI argument."""
     aoi_name = None
     args = sys.argv[1:]
@@ -88,18 +98,26 @@ def _resolve_aoi(aoi_dropdown, CFG, mo, sys):
         aoi_name = aoi_dropdown.value
     aoi_label = CFG["aoi"][aoi_name]["label"]
     mo.md(f"**Active AOI:** {aoi_label} (`{aoi_name}`)")
-    return (aoi_name, aoi_label)
+    return (aoi_name,)
 
 
-# ---------------------------------------------------------------------------
-# Task: FEMA-Base bridge via IoU
-# ---------------------------------------------------------------------------
+@app.cell
+def _run_controls(aoi_name, mo):
+    """Run button — click to trigger bridge generation in notebook mode."""
+    run_btn = mo.ui.run_button(label="▶  Run bridges")
+    mo.hstack([mo.md(f"**AOI:** `{aoi_name}`"), run_btn], justify="start")
+    return (run_btn,)
 
 
 @app.cell
 def _task_fema_bridge(
-    CFG, STORAGE, Path, get_connection, compute_iou_sql,
-    flow, task, get_run_logger, mo,
+    Path,
+    StorageConfig,
+    compute_iou_sql,
+    get_connection,
+    get_run_logger,
+    mo,
+    task,
 ):
     """FEMA-Base IoU bridge task."""
 
@@ -129,22 +147,32 @@ def _task_fema_bridge(
         logger.info(f"Generating FEMA-Base IoU bridge for AOI {aoi} ...")
         con = get_connection(memory_limit=mem, threads=threads)
 
-        # Two-stage reciprocal best-match:
-        #   Stage 1 (best_per_fema): for each FEMA record keep the Overture
-        #            building with the highest IoU.
-        #   Stage 2 (reciprocal): if multiple FEMA records claim the same
-        #            Overture building, keep only the one with the highest IoU.
-        # This guarantees a one-to-one bridge on both sides.
+        # Two-stage match — keeps the best Overture building per FEMA record:
+        #   Stage 1 (candidates): IoU-filtered cross join of FEMA × Overture.
+        #   Stage 2 (best_per_fema): for each FEMA record keep the Overture
+        #            building with the highest IoU. Each FEMA can only belong
+        #            to one Overture building.
+        # One Overture building may match multiple FEMA records (many-to-one
+        # is intentional: a large Overture footprint can subsume several
+        # smaller FEMA structures). Flow 3 collapses those to one Gold row.
         query = f"""
         COPY (
-            WITH candidates AS (
+            WITH fema_src AS (
+                SELECT build_id as fema_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{fema_path}')
+            ),
+            overture_src AS (
+                SELECT overture_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{overture_path}')
+            ),
+            candidates AS (
                 SELECT
                     f.fema_id,
                     o.overture_id,
                     {iou_col},
                     ST_AsText(ST_Centroid(f.geometry)) AS fema_centroid_wkt
-                FROM read_parquet('{fema_path}') f
-                JOIN read_parquet('{overture_path}') o
+                FROM fema_src f
+                JOIN overture_src o
                   ON ST_Intersects(f.geometry, o.geometry)
                 WHERE ST_Area(ST_Intersection(f.geometry, o.geometry)) /
                       NULLIF(ST_Area(ST_Union(f.geometry, o.geometry)), 0) >= {min_iou}
@@ -156,11 +184,11 @@ def _task_fema_bridge(
                     PARTITION BY fema_id ORDER BY iou DESC
                 ) = 1
             )
+            -- Keep all FEMA matches per Overture building (many-to-one allowed).
+            -- A large Overture footprint may subsume multiple FEMA structures;
+            -- Flow 3 aggregates them into a single Gold record using best-IoU scoring.
             SELECT fema_id, overture_id, iou, fema_centroid_wkt
             FROM best_per_fema
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY overture_id ORDER BY iou DESC
-            ) = 1
         ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """
         con.execute(query)
@@ -173,15 +201,14 @@ def _task_fema_bridge(
     return (generate_fema_bridge,)
 
 
-# ---------------------------------------------------------------------------
-# Task: NSI-Base bridge via point-in-polygon
-# ---------------------------------------------------------------------------
-
-
 @app.cell
 def _task_nsi_bridge(
-    CFG, STORAGE, Path, get_connection,
-    flow, task, get_run_logger, mo,
+    Path,
+    StorageConfig,
+    get_connection,
+    get_run_logger,
+    mo,
+    task,
 ):
     """NSI point-in-polygon bridge task."""
 
@@ -208,26 +235,75 @@ def _task_nsi_bridge(
         logger.info(f"Generating NSI-Base point-in-polygon bridge for AOI {aoi} ...")
         con = get_connection(memory_limit=mem, threads=threads)
 
+        # Two-pass approach:
+        #   Pass 1 (pip_matches): strict ST_Within — NSI point inside Overture polygon.
+        #   Pass 2 (convex_hull_matches): ST_Within against convex hull of Overture polygon,
+        #     used only for NSI points that failed Pass 1. This catches points that sit in the
+        #     interior void of horseshoe/C-shaped buildings where the literal polygon has a
+        #     concave cavity (e.g., a courtyard), making strict PIP fail.
+        # Both passes keep the smallest enclosing building when multiple candidates match.
+        # A match_method column records which pass produced each row.
         query = f"""
         COPY (
-            SELECT
-                n.nsi_id,
-                o.overture_id,
-                n.occtype                               AS nsi_occtype,
-                n.val_struct                            AS nsi_val_struct,
-                n.val_cont                              AS nsi_val_cont,
-                ST_AsText(n.geometry)                   AS nsi_point_wkt
-            FROM read_parquet('{nsi_path}') n
-            JOIN read_parquet('{overture_path}') o
-              ON ST_Within(n.geometry, o.geometry)
-            QUALIFY ROW_NUMBER() OVER (
-                PARTITION BY n.nsi_id
-                ORDER BY ST_Area(o.geometry) ASC
-            ) = 1
+            WITH nsi_src AS (
+                SELECT nsi_id, occtype, val_struct, val_cont,
+                       ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{nsi_path}')
+            ),
+            overture_src AS (
+                SELECT overture_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{overture_path}')
+            ),
+            pip_matches AS (
+                SELECT
+                    n.nsi_id,
+                    o.overture_id,
+                    n.occtype                               AS nsi_occtype,
+                    n.val_struct                            AS nsi_val_struct,
+                    n.val_cont                              AS nsi_val_cont,
+                    ST_AsText(n.geometry)                   AS nsi_point_wkt,
+                    'point_in_polygon'                      AS match_method
+                FROM nsi_src n
+                JOIN overture_src o
+                  ON ST_Within(n.geometry, o.geometry)
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY n.nsi_id
+                    ORDER BY ST_Area(o.geometry) ASC
+                ) = 1
+            ),
+            convex_hull_matches AS (
+                SELECT
+                    n.nsi_id,
+                    o.overture_id,
+                    n.occtype                               AS nsi_occtype,
+                    n.val_struct                            AS nsi_val_struct,
+                    n.val_cont                              AS nsi_val_cont,
+                    ST_AsText(n.geometry)                   AS nsi_point_wkt,
+                    'convex_hull'                           AS match_method
+                FROM nsi_src n
+                JOIN overture_src o
+                  ON ST_Within(n.geometry, ST_ConvexHull(o.geometry))
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pip_matches p WHERE p.nsi_id = n.nsi_id
+                )
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY n.nsi_id
+                    ORDER BY ST_Area(o.geometry) ASC
+                ) = 1
+            )
+            SELECT * FROM pip_matches
+            UNION ALL
+            SELECT * FROM convex_hull_matches
         ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """
         con.execute(query)
-        count = con.execute(f"SELECT COUNT(*) FROM '{out_path}'").fetchone()[0]
+        pip_count = con.execute(
+            f"SELECT COUNT(*) FROM '{out_path}' WHERE match_method = 'point_in_polygon'"
+        ).fetchone()[0]
+        hull_count = con.execute(
+            f"SELECT COUNT(*) FROM '{out_path}' WHERE match_method = 'convex_hull'"
+        ).fetchone()[0]
+        count = pip_count + hull_count
 
         # Also write unmatched NSI points — these represent NSI-recorded structures
         # that have no Overture building footprint. Used by Flow 3 to compute
@@ -254,7 +330,8 @@ def _task_nsi_bridge(
         ).fetchone()[0]
 
         logger.info(
-            f"NSI bridge: {count:,} matched, {unmatched_count:,} unmatched "
+            f"NSI bridge: {pip_count:,} PIP + {hull_count:,} convex-hull = "
+            f"{count:,} matched, {unmatched_count:,} unmatched "
             f"(no Overture footprint) → {out_path}"
         )
         con.close()
@@ -264,15 +341,86 @@ def _task_nsi_bridge(
     return (generate_nsi_bridge,)
 
 
-# ---------------------------------------------------------------------------
-# Bridge diagnostics cell
-# ---------------------------------------------------------------------------
+@app.cell
+def _task_nsi_fema_bridge(
+    Path,
+    StorageConfig,
+    get_connection,
+    get_run_logger,
+    mo,
+    task,
+):
+    """NSI point-in-polygon bridge against FEMA building geometries."""
+
+    @task(name="generate-nsi-fema-bridge", retries=1)
+    def generate_nsi_fema_bridge(aoi: str, cfg: dict, storage: StorageConfig) -> Path:
+        """Map NSI structure points onto FEMA building footprints.
+
+        Produces a bridge analogous to the Overture NSI bridge but using FEMA
+        building geometries as the polygon source. Flow 3 uses this to enrich
+        FEMA-only Gold records (buildings with no Overture footprint) with NSI
+        occupancy and structural-value attributes.
+        """
+        logger = get_run_logger()
+        mem = cfg["duckdb"]["memory_limit"]
+        threads = cfg["duckdb"]["threads"]
+
+        nsi_path = Path(storage.bronze_path("nsi_structures")) / aoi / "structures.parquet"
+        fema_path = Path(storage.bronze_path("fema_structures")) / aoi / "structures.parquet"
+        out_path = Path(storage.silver_path("nsi_fema_bridge")).parent / aoi / "nsi_fema_bridge.parquet"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if not nsi_path.exists():
+            raise FileNotFoundError(
+                f"NSI structures not found: {nsi_path}. Run Flow 1 first."
+            )
+        if not fema_path.exists():
+            raise FileNotFoundError(
+                f"FEMA structures not found: {fema_path}. Run Flow 1 first."
+            )
+
+        logger.info(f"Generating NSI-FEMA point-in-polygon bridge for AOI {aoi} ...")
+        con = get_connection(memory_limit=mem, threads=threads)
+
+        query = f"""
+        COPY (
+            WITH nsi_src AS (
+                SELECT nsi_id, occtype, val_struct, val_cont,
+                       ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{nsi_path}')
+            ),
+            fema_src AS (
+                SELECT build_id AS fema_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{fema_path}')
+            )
+            SELECT
+                n.nsi_id,
+                f.fema_id,
+                n.occtype                               AS nsi_occtype,
+                n.val_struct                            AS nsi_val_struct,
+                n.val_cont                              AS nsi_val_cont,
+                ST_AsText(n.geometry)                   AS nsi_point_wkt
+            FROM nsi_src n
+            JOIN fema_src f
+              ON ST_Within(n.geometry, f.geometry)
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY n.nsi_id
+                ORDER BY ST_Area(f.geometry) ASC
+            ) = 1
+        ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+        con.execute(query)
+        count = con.execute(f"SELECT COUNT(*) FROM '{out_path}'").fetchone()[0]
+        logger.info(f"NSI-FEMA bridge: {count:,} NSI points matched to FEMA buildings → {out_path}")
+        con.close()
+        return out_path
+
+    mo.md("### Task: NSI-FEMA bridge — defined")
+    return (generate_nsi_fema_bridge,)
 
 
 @app.cell
-def _bridge_diagnostics(
-    STORAGE, CFG, aoi_name, Path, get_connection, mo,
-):
+def _bridge_diagnostics(Path, STORAGE, aoi_name, get_connection, mo):
     """Show bridge match rate statistics (notebook mode only)."""
     import os
 
@@ -280,35 +428,51 @@ def _bridge_diagnostics(
     fema_bronze = Path(STORAGE.bronze_path("fema_structures")) / aoi_name / "structures.parquet"
     nsi_bridge = Path(STORAGE.silver_path("nsi_bridge")).parent / aoi_name / "nsi_bridge.parquet"
     nsi_bronze = Path(STORAGE.bronze_path("nsi_structures")) / aoi_name / "structures.parquet"
-
     stats = []
     if fema_bridge.exists() and fema_bronze.exists():
         con = get_connection()
         total = con.execute(f"SELECT COUNT(*) FROM '{fema_bronze}'").fetchone()[0]
-        matched = con.execute(f"SELECT COUNT(*) FROM '{fema_bridge}'").fetchone()[0]
+        matched = con.execute(f"SELECT COUNT(DISTINCT fema_id) FROM '{fema_bridge}'").fetchone()[0]
+        overture_count = con.execute(f"SELECT COUNT(DISTINCT overture_id) FROM '{fema_bridge}'").fetchone()[0]
         con.close()
-        stats.append(f"**FEMA bridge:** {matched:,} / {total:,} matched ({matched/total*100:.1f}%)")
+        stats.append(
+            f"**FEMA bridge:** {matched:,} / {total:,} FEMA matched ({matched/total*100:.1f}%) "
+            f"→ {overture_count:,} Overture buildings (many-to-one allowed)"
+        )
 
+    nsi_fema_bridge = Path(STORAGE.silver_path("nsi_fema_bridge")).parent / aoi_name / "nsi_fema_bridge.parquet"
     if nsi_bridge.exists() and nsi_bronze.exists():
         con = get_connection()
         total = con.execute(f"SELECT COUNT(*) FROM '{nsi_bronze}'").fetchone()[0]
         matched = con.execute(f"SELECT COUNT(*) FROM '{nsi_bridge}'").fetchone()[0]
+        pip = con.execute(f"SELECT COUNT(*) FROM '{nsi_bridge}' WHERE match_method = 'point_in_polygon'").fetchone()[0]
+        hull = con.execute(f"SELECT COUNT(*) FROM '{nsi_bridge}' WHERE match_method = 'convex_hull'").fetchone()[0]
         con.close()
-        stats.append(f"**NSI bridge:** {matched:,} / {total:,} matched ({matched/total*100:.1f}%)")
+        stats.append(
+            f"**NSI-Overture bridge:** {matched:,} / {total:,} matched ({matched/total*100:.1f}%) "
+            f"— {pip:,} PIP + {hull:,} convex-hull"
+        )
+
+    if nsi_fema_bridge.exists() and nsi_bronze.exists():
+        con = get_connection()
+        total = con.execute(f"SELECT COUNT(*) FROM '{nsi_bronze}'").fetchone()[0]
+        matched = con.execute(f"SELECT COUNT(*) FROM '{nsi_fema_bridge}'").fetchone()[0]
+        con.close()
+        stats.append(f"**NSI-FEMA bridge:** {matched:,} / {total:,} matched ({matched/total*100:.1f}%)")
 
     mo.md("### Bridge Diagnostics\n" + ("\n\n".join(stats) if stats else "_Run Flow 1 + Flow 2 first._"))
-    return ()
-
-
-# ---------------------------------------------------------------------------
-# Prefect flow
-# ---------------------------------------------------------------------------
+    return
 
 
 @app.cell
 def _flow_definition(
-    generate_fema_bridge, generate_nsi_bridge,
-    flow, CFG, STORAGE, mo,
+    CFG,
+    STORAGE,
+    flow,
+    generate_fema_bridge,
+    generate_nsi_bridge,
+    generate_nsi_fema_bridge,
+    mo,
 ):
     """Define the Prefect bridge-generation flow."""
 
@@ -316,17 +480,20 @@ def _flow_definition(
     def generate_bridges_flow(aoi: str = "saipan"):
         fema_bridge_file = generate_fema_bridge(aoi, CFG, STORAGE)
         nsi_bridge_file = generate_nsi_bridge(aoi, CFG, STORAGE)
+        nsi_fema_bridge_file = generate_nsi_fema_bridge(aoi, CFG, STORAGE)
         return {
             "fema_bridge": str(fema_bridge_file),
             "nsi_bridge": str(nsi_bridge_file),
+            "nsi_fema_bridge": str(nsi_fema_bridge_file),
         }
 
     mo.md(f"""
     ## Flow: `gers-generate-bridges`
 
     **Tasks:**
-    1. `generate-fema-bridge` — IoU spatial join (Overture × FEMA)
-    2. `generate-nsi-bridge` — Point-in-polygon join (NSI points → Overture footprints)
+    1. `generate-fema-bridge` — IoU spatial join (Overture × FEMA, many-FEMA-per-Overture allowed)
+    2. `generate-nsi-bridge` — PIP + convex-hull fallback join (NSI points → Overture footprints)
+    3. `generate-nsi-fema-bridge` — PIP join (NSI points → FEMA footprints, for FEMA-only enrichment)
 
     Run:
     ```bash
@@ -337,12 +504,41 @@ def _flow_definition(
 
 
 @app.cell
-def _run(generate_bridges_flow, aoi_name, mo):
+def _notebook_run(
+    CFG,
+    STORAGE,
+    aoi_name,
+    generate_fema_bridge,
+    generate_nsi_bridge,
+    generate_nsi_fema_bridge,
+    mo,
+    run_btn,
+):
+    """Execute tasks directly in notebook mode, gated by run button."""
+    if mo.running_in_notebook():
+        mo.stop(
+            not run_btn.value,
+            mo.md("☝️ Click **▶ Run bridges** above to start."),
+        )
+        _aoi = aoi_name
+        _fema_bridge_file = generate_fema_bridge(_aoi, CFG, STORAGE)
+        _nsi_bridge_file = generate_nsi_bridge(_aoi, CFG, STORAGE)
+        _nsi_fema_bridge_file = generate_nsi_fema_bridge(_aoi, CFG, STORAGE)
+        print({
+            "fema_bridge": str(_fema_bridge_file),
+            "nsi_bridge": str(_nsi_bridge_file),
+            "nsi_fema_bridge": str(_nsi_fema_bridge_file),
+        })
+    return
+
+
+@app.cell
+def _run(aoi_name, generate_bridges_flow, mo):
     """Execute flow when run as a script."""
     if not mo.running_in_notebook():
         result = generate_bridges_flow(aoi=aoi_name)
         print(result)
-    return ()
+    return
 
 
 if __name__ == "__main__":
