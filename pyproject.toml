@@ -2,11 +2,10 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-# ── Legacy: openpois POI conflation package (keep until migration complete) ──
 [project]
 name = "gersite"
 authors = [{ name = "Nathaniel Henry", email = "nat@henryspatialanalysis.com" }]
-description = "Open POI conflation between OpenStreetMap and Overture Maps"
+description = "GERSite building conflation pipeline (Overture + FEMA + NSI)"
 readme = "README.md"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -32,17 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/henryspatialanalysis/openpois"
-Source = "https://github.com/henryspatialanalysis/openpois"
-Tracker = "https://github.com/henryspatialanalysis/openpois/issues"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-"config_versioned" = ["data/*.yaml", "data/*.csv"]
-"openpois" = ["conflation/data/*.csv"]
-"openpois.publish" = ["templates/*"]
+Documentation = "https://github.com/Niyam-Projects/GERSite"
+Source = "https://github.com/Niyam-Projects/GERSite"
+Tracker = "https://github.com/Niyam-Projects/GERSite/issues"
 
 # ── GERSite: Building Conflation Pipeline (uv-managed) ──────────────────────
 # Install with:  uv sync

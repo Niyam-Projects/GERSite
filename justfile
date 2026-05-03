@@ -93,10 +93,10 @@ nb-tiles:
 test:
     uv run pytest tests/ -v
 
-# Lint source code and tests
+# Lint source code, flows, libs, and tests
 lint:
-    uv run flake8 src/ scripts/ tests/
-    uv run pylint src/openpois/
+    uv run flake8 flows/ lib/ tests/
+    uv run pylint lib/
 
 # Build the Vue site for production
 site-build:
