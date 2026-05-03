@@ -35,6 +35,9 @@ Documentation = "https://github.com/Niyam-Projects/GERSite"
 Source = "https://github.com/Niyam-Projects/GERSite"
 Tracker = "https://github.com/Niyam-Projects/GERSite/issues"
 
+[tool.setuptools]
+packages = []  # no installable package; flows use sys.path to import from lib/
+
 # ── GERSite: Building Conflation Pipeline (uv-managed) ──────────────────────
 # Install with:  uv sync
 # Run a flow:    uv run python flows/ingest_sources.py --aoi saipan
