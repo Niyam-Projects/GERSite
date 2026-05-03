@@ -89,6 +89,7 @@ def _resolve_aoi(CFG, aoi_dropdown, mo, sys):
             aoi_name = args[idx + 1]
     if aoi_name is None:
         aoi_name = aoi_dropdown.value
+    aoi_name = aoi_name.replace("-", "_")
     aoi_label = CFG["aoi"][aoi_name]["label"]
     mo.md(f"**Active AOI:** {aoi_label} (`{aoi_name}`)")
     return (aoi_name,)

@@ -112,13 +112,13 @@ def _resolve_aoi(AOI_CHOICES, CFG, aoi_dropdown, mo):
         parser = argparse.ArgumentParser(description="Ingest Sources flow")
         parser.add_argument(
             "--aoi",
-            choices=AOI_CHOICES,
             default=AOI_CHOICES[0],
-            help="Study area to ingest (e.g. saipan, guam)",
+            help="Study area to ingest (e.g. saipan, guam, miami_dade)",
         )
         args, _ = parser.parse_known_args()
         aoi_name = args.aoi
 
+    aoi_name = aoi_name.replace("-", "_")
     aoi_label = CFG["aoi"][aoi_name]["label"]
     mo.md(f"**Active AOI:** {aoi_label} (`{aoi_name}`)")
     return (aoi_name,)

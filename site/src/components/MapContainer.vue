@@ -66,15 +66,19 @@ import { fromLonLat, transformExtent } from 'ol/proj'
 import { apply } from 'ol-mapbox-style'
 import BuildingPopup from './BuildingPopup.vue'
 import { useGeolocation } from '../composables/useGeolocation.js'
-import { getGoldBuildingsLayer, updateGoldFilters, wrapGoldFeature }           from '../layers/goldBuildingsLayer.js'
-import { getFemaBuildingsLayer, updateFemaFilters, wrapFemaFeature }            from '../layers/femaBuildingsLayer.js'
-import { getOvertureBuildingsLayer, wrapOvertureBuildingFeature }               from '../layers/overtureBuildingsLayer.js'
-import { getNsiUnmatchedLayer, wrapNsiUnmatchedFeature }                        from '../layers/nsiUnmatchedLayer.js'
+import { getGoldBuildingsLayer, getAllGoldLayers, updateGoldFilters, wrapGoldFeature }   from '../layers/goldBuildingsLayer.js'
+import { getFemaBuildingsLayer, getAllFemaLayers, updateFemaFilters, wrapFemaFeature }   from '../layers/femaBuildingsLayer.js'
+import { getOvertureBuildingsLayer, wrapOvertureBuildingFeature }                        from '../layers/overtureBuildingsLayer.js'
+import { getNsiUnmatchedLayer, getAllNsiLayers, wrapNsiUnmatchedFeature }                from '../layers/nsiUnmatchedLayer.js'
 import {
+  AOIS,
   BASE_MAP_STYLES,
   INITIAL_CENTER,
   INITIAL_ZOOM,
   MIN_ZOOM,
+  goldBuildingsTilesUrl,
+  femaBuildingsTilesUrl,
+  nsiUnmatchedTilesUrl,
 } from '../constants.js'
 
 const props = defineProps({
@@ -98,9 +102,14 @@ const { locate } = useGeolocation()
 let geoOverlay = null
 let geocodeMarker = null
 
-// Helper: get all data layers
+// Helper: get all data layers (all AOIs + Overture global)
 function getDataLayers() {
-  return [getGoldBuildingsLayer(), getFemaBuildingsLayer(), getOvertureBuildingsLayer(), getNsiUnmatchedLayer()]
+  return [
+    ...getAllGoldLayers(),
+    ...getAllFemaLayers(),
+    getOvertureBuildingsLayer(),
+    ...getAllNsiLayers(),
+  ]
 }
 
 onMounted(async () => {
@@ -110,19 +119,25 @@ onMounted(async () => {
     minZoom: MIN_ZOOM,
   })
 
-  const goldLyr     = getGoldBuildingsLayer()
-  const femaLyr     = getFemaBuildingsLayer()
-  const overtureLyr = getOvertureBuildingsLayer()
-  const nsiLyr      = getNsiUnmatchedLayer()
-  goldLyr.setVisible(props.activeSource === 'gold')
-  femaLyr.setVisible(props.activeSource === 'fema')
-  overtureLyr.setVisible(props.activeSource === 'overture')
-  nsiLyr.setVisible(props.nsiUnmatchedVisible)
+  // Create one layer per AOI for each local PMTile source
+  const goldLayers    = AOIS.map(aoi => getGoldBuildingsLayer(goldBuildingsTilesUrl(aoi.id)))
+  const femaLayers    = AOIS.map(aoi => getFemaBuildingsLayer(femaBuildingsTilesUrl(aoi.id)))
+  const nsiLayers     = AOIS.map(aoi => getNsiUnmatchedLayer(nsiUnmatchedTilesUrl(aoi.id)))
+  const overtureLyr   = getOvertureBuildingsLayer()
+
+  const isGold    = props.activeSource === 'gold'
+  const isFema    = props.activeSource === 'fema'
+  const isOverture = props.activeSource === 'overture'
+
+  for (const lyr of goldLayers)  lyr.setVisible(isGold)
+  for (const lyr of femaLayers)  lyr.setVisible(isFema)
+  overtureLyr.setVisible(isOverture)
+  for (const lyr of nsiLayers)   lyr.setVisible(props.nsiUnmatchedVisible)
 
   const olMap = new Map({
     target: mapEl.value,
     view,
-    layers: [goldLyr, femaLyr, overtureLyr, nsiLyr],
+    layers: [...goldLayers, ...femaLayers, overtureLyr, ...nsiLayers],
   })
   map.value = olMap
 
@@ -208,10 +223,10 @@ function handleClick(evt) {
 
   map.value.forEachFeatureAtPixel(evt.pixel, (feature, lyr) => {
     let wrapped = null
-    if (lyr === getGoldBuildingsLayer())          wrapped = wrapGoldFeature(feature)
-    else if (lyr === getFemaBuildingsLayer())      wrapped = wrapFemaFeature(feature)
-    else if (lyr === getOvertureBuildingsLayer())  wrapped = wrapOvertureBuildingFeature(feature)
-    else if (lyr === getNsiUnmatchedLayer())       wrapped = wrapNsiUnmatchedFeature(feature)
+    if (getAllGoldLayers().includes(lyr))        wrapped = wrapGoldFeature(feature)
+    else if (getAllFemaLayers().includes(lyr))   wrapped = wrapFemaFeature(feature)
+    else if (lyr === getOvertureBuildingsLayer()) wrapped = wrapOvertureBuildingFeature(feature)
+    else if (getAllNsiLayers().includes(lyr))    wrapped = wrapNsiUnmatchedFeature(feature)
     if (!wrapped) return false
 
     selectedFeature.value = wrapped
@@ -292,14 +307,14 @@ defineExpose({ flyToBbox })
 
 // Source visibility watcher — NSI stays independent
 watch(() => props.activeSource, (src) => {
-  getGoldBuildingsLayer().setVisible(src === 'gold')
-  getFemaBuildingsLayer().setVisible(src === 'fema')
+  for (const lyr of getAllGoldLayers())  lyr.setVisible(src === 'gold')
+  for (const lyr of getAllFemaLayers())  lyr.setVisible(src === 'fema')
   getOvertureBuildingsLayer().setVisible(src === 'overture')
   closePopup()
 })
 
 watch(() => props.nsiUnmatchedVisible, (v) => {
-  getNsiUnmatchedLayer().setVisible(v)
+  for (const lyr of getAllNsiLayers())  lyr.setVisible(v)
 })
 
 watch(() => props.goldFilters, (f) => { updateGoldFilters(f) }, { deep: true })

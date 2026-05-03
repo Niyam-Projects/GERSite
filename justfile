@@ -22,11 +22,18 @@ install-dev:
 
 # ── GERSite: Run pipeline flows ──────────────────────────────────────────────
 
-# Run all three flows for an AOI  (e.g. just run miami_dade)
+# Run all four flows for an AOI end-to-end, producing PMTiles  (e.g. just run miami_dade)
 run aoi:
     uv run python flows/ingest_sources.py --aoi {{aoi}}
     uv run python flows/generate_bridges.py --aoi {{aoi}}
     uv run python flows/produce_gold_layer.py --aoi {{aoi}}
+    uv run python flows/generate_tiles.py --aoi {{aoi}}
+
+# Flows 2–4 only — skip ingest, re-run bridges → gold → tiles  (e.g. just process miami_dade)
+process aoi:
+    uv run python flows/generate_bridges.py --aoi {{aoi}}
+    uv run python flows/produce_gold_layer.py --aoi {{aoi}}
+    uv run python flows/generate_tiles.py --aoi {{aoi}}
 
 # Flow 1 only — ingest Bronze sources  (e.g. just ingest miami_dade)
 ingest aoi:
@@ -39,6 +46,10 @@ bridge aoi:
 # Flow 3 only — produce Gold layer  (e.g. just gold miami_dade)
 gold aoi:
     uv run python flows/produce_gold_layer.py --aoi {{aoi}}
+
+# Flow 4 only — generate PMTiles from Gold layer  (e.g. just tiles miami_dade)
+tiles aoi:
+    uv run python flows/generate_tiles.py --aoi {{aoi}}
 
 # ── GERSite: Test AOIs ───────────────────────────────────────────────────────
 
@@ -71,6 +82,10 @@ nb-bridge:
 # Open Flow 3 as a Marimo notebook
 nb-gold:
     uv run marimo edit flows/produce_gold_layer.py
+
+# Open Flow 4 as a Marimo notebook
+nb-tiles:
+    uv run marimo edit flows/generate_tiles.py
 
 # ── OpenPOIs (legacy) ────────────────────────────────────────────────────────
 

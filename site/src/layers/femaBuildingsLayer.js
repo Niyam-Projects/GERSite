@@ -1,23 +1,29 @@
 import VectorTileLayer from 'ol/layer/VectorTile'
 import { PMTilesVectorSource } from 'ol-pmtiles'
 import { Style, Fill, Stroke } from 'ol/style'
-import { FEMA_BUILDINGS_PMTILES_URL, OCCUPANCY_COLORS } from '../constants.js'
+import { OCCUPANCY_COLORS } from '../constants.js'
 
-let layer = null
+// Per-URL layer cache — one layer instance per AOI tile URL
+const layers = new Map()
 let enabledOccupancies = null  // null = all on; Set<string> for filtered
 
 const styleCache = {}
 
-export function getFemaBuildingsLayer() {
-  if (layer) return layer
+export function getFemaBuildingsLayer(url) {
+  if (layers.has(url)) return layers.get(url)
 
-  layer = new VectorTileLayer({
-    source: new PMTilesVectorSource({ url: FEMA_BUILDINGS_PMTILES_URL }),
+  const layer = new VectorTileLayer({
+    source: new PMTilesVectorSource({ url }),
     style: femaBuildingStyle,
     zIndex: 11,
     visible: false,
   })
+  layers.set(url, layer)
   return layer
+}
+
+export function getAllFemaLayers() {
+  return [...layers.values()]
 }
 
 export function updateFemaFilters(filtersObj) {
@@ -30,7 +36,7 @@ export function updateFemaFilters(filtersObj) {
   } else {
     enabledOccupancies = new Set(enabled)
   }
-  if (layer) layer.changed()
+  for (const layer of layers.values()) layer.changed()
 }
 
 function femaBuildingStyle(feature) {

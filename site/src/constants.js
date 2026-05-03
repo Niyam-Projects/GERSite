@@ -1,12 +1,42 @@
-// PMTiles URLs — served locally by the Vite dev server middleware (vite.config.js).
-// For production deployment, replace with public HTTP URLs (e.g., Source Cooperative).
-export const GOLD_BUILDINGS_PMTILES_URL = '/tiles/gold_buildings/miami_dade/buildings.pmtiles'
-export const FEMA_BUILDINGS_PMTILES_URL = '/tiles/fema_buildings/miami_dade/fema.pmtiles'
-export const NSI_UNMATCHED_PMTILES_URL  = '/tiles/nsi_unmatched/miami_dade/nsi_unmatched.pmtiles'
-
 // Overture buildings — hosted monthly release (update URL each release cycle)
 export const OVERTURE_BUILDINGS_PMTILES_URL =
   'https://tiles.overturemaps.org/2026-04-15.0/buildings.pmtiles'
+
+// PMTile URL helpers — served locally by the Vite dev server middleware (vite.config.js).
+// For production deployment, replace the base path with a public HTTP URL.
+export function goldBuildingsTilesUrl(aoiId)  { return `/tiles/gold_buildings/${aoiId}/buildings.pmtiles` }
+export function femaBuildingsTilesUrl(aoiId)  { return `/tiles/fema_buildings/${aoiId}/fema.pmtiles` }
+export function nsiUnmatchedTilesUrl(aoiId)   { return `/tiles/nsi_unmatched/${aoiId}/nsi_unmatched.pmtiles` }
+
+// Areas of Interest (AOIs) — all PMTile layers for every AOI are loaded simultaneously.
+// The AOI selector in the header is purely for navigation (fly-to), not visibility toggling.
+// bbox: [west, south, east, north]
+export const AOIS = [
+  {
+    id:     'miami_dade',
+    label:  'Miami-Dade County, FL',
+    center: [-80.1918, 25.7617],
+    bbox:   [-80.880, 25.130, -80.100, 25.980],
+  },
+  {
+    id:     'saipan',
+    label:  'Saipan, CNMI',
+    center: [145.765, 15.19],
+    bbox:   [145.650, 15.060, 145.880, 15.320],
+  },
+  {
+    id:     'puerto_rico',
+    label:  'Puerto Rico',
+    center: [-66.26, 18.22],
+    bbox:   [-67.300, 17.870, -65.220, 18.520],
+  },
+  {
+    id:     'guam',
+    label:  'Guam',
+    center: [144.794, 13.444],
+    bbox:   [144.618, 13.234, 144.956, 13.654],
+  },
+]
 
 // Canonical FEMA OCC_CLS occupancy categories (used as filter options for
 // both the Gold layer general_occupancy field and the FEMA OCC_CLS field).
@@ -61,7 +91,7 @@ export const BASE_MAP_STYLES = [
 
 // Zoom thresholds
 export const MIN_ZOOM = 10
-export const INITIAL_CENTER = [-80.1918, 25.7617]  // Miami, FL
+export const INITIAL_CENTER = [-80.1918, 25.7617]  // Miami-Dade (first AOI)
 export const INITIAL_ZOOM = 14
 
 // Stadia Maps Geocoding

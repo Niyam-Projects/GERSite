@@ -7,6 +7,7 @@
       @update:nsi-visible="nsiUnmatchedVisible = $event"
     />
     <SearchBar @fly-to="handleFlyTo" />
+    <AoiSelector @fly-to="handleFlyTo" />
     <div class="top-bar-right">
       <a href="/about.html" class="about-link">About</a>
       <a
@@ -39,6 +40,7 @@
 import { ref } from 'vue'
 import SourceToggle from './components/SourceToggle.vue'
 import SearchBar from './components/SearchBar.vue'
+import AoiSelector from './components/AoiSelector.vue'
 import MapContainer from './components/MapContainer.vue'
 import OccupancyFilter from './components/OccupancyFilter.vue'
 import { OCCUPANCY_TYPES } from './constants.js'

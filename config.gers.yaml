@@ -81,6 +81,7 @@ duckdb:
 bridges:
   fema_min_iou: 0.10             # FEMA records with IoU < this → additive candidates
   fema_high_iou: 0.80            # IoU threshold for High confidence score
+  nsi_nearest_buffer_m: 10       # Pass 3 search radius (metres) for unmatched NSI points
 
 # Confidence scoring thresholds
 scoring:

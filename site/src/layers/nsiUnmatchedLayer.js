@@ -1,9 +1,10 @@
 import VectorTileLayer from 'ol/layer/VectorTile'
 import { PMTilesVectorSource } from 'ol-pmtiles'
 import { Style, Circle, Fill, Stroke } from 'ol/style'
-import { NSI_UNMATCHED_PMTILES_URL, COLORS } from '../constants.js'
+import { COLORS } from '../constants.js'
 
-let layer = null
+// Per-URL layer cache — one layer instance per AOI tile URL
+const layers = new Map()
 
 // Distinct orange point style to contrast with building polygon layers
 const NSI_STYLE = new Style({
@@ -14,16 +15,21 @@ const NSI_STYLE = new Style({
   }),
 })
 
-export function getNsiUnmatchedLayer() {
-  if (layer) return layer
+export function getNsiUnmatchedLayer(url) {
+  if (layers.has(url)) return layers.get(url)
 
-  layer = new VectorTileLayer({
-    source: new PMTilesVectorSource({ url: NSI_UNMATCHED_PMTILES_URL }),
+  const layer = new VectorTileLayer({
+    source: new PMTilesVectorSource({ url }),
     style: NSI_STYLE,
     zIndex: 20,    // on top of polygon layers so points are always clickable
     visible: false,
   })
+  layers.set(url, layer)
   return layer
+}
+
+export function getAllNsiLayers() {
+  return [...layers.values()]
 }
 
 /**

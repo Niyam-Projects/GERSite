@@ -19,7 +19,8 @@ async function search(query) {
         const params = new URLSearchParams({
           api_key: import.meta.env.VITE_STADIA_API_KEY,
           text: query,
-          'boundary.country': 'US',
+          // Include US, Puerto Rico (PR), CNMI/Saipan (MP), and Guam (GU)
+          'boundary.country': 'US,PR,MP,GU',
           size: '5',
         })
         const resp = await fetch(`${STADIA_GEOCODING_URL}?${params}`)
