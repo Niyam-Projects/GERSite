@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Florida",
+    "aoi_id": "florida",
+    "note": "State of Florida, US. Full-state AOI covering the peninsula and panhandle."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-87.700, 24.400],
+        [-79.900, 24.400],
+        [-79.900, 31.000],
+        [-87.700, 31.000],
+        [-87.700, 24.400]
+      ]
+    ]
+  }
+}

@@ -15,24 +15,32 @@ aoi:
   saipan:
     label: "Saipan, CNMI"
     bbox: [145.650, 15.060, 145.880, 15.320]
-    geojson: "aoi/saipan.geojson"
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/saipan.geojson"
   guam:
     label: "Guam"
     bbox: [144.560, 13.180, 145.000, 13.700]
-    geojson: "aoi/guam.geojson"
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/guam.geojson"
   puerto_rico:
     label: "Puerto Rico"
     bbox: [-67.300, 17.870, -65.220, 18.520]
-    geojson: "aoi/puerto_rico.geojson"
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/puerto_rico.geojson"
   miami_dade:
     label: "Miami-Dade County, FL"
     bbox: [-80.880, 25.130, -80.100, 25.980]
-    geojson: "aoi/miami_dade.geojson"
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/miami_dade.geojson"
+  florida:
+    label: "Florida"
+    bbox: [-87.700, 24.400, -79.900, 31.000]
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/florida.geojson"
+  us_virgin_islands:
+    label: "US Virgin Islands"
+    bbox: [-65.100, 17.600, -64.500, 18.500]
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/us_virgin_islands.geojson"
 
 # Local storage root — all bronze/silver/gold paths are relative to this.
 # Swap to an S3 prefix (e.g., s3://your-bucket/gers/) for cloud deployment.
 storage:
-  root: "E:/gersite/data"
+  root: "/Users/praveenaparimi/data/gers"
   bronze:
     overture_buildings: "bronze/overture/buildings"     # partitioned by AOI
     overture_osm_bridge: "bronze/overture/osm_bridge"          # partitioned by AOI

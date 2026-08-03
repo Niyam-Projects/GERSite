@@ -243,20 +243,55 @@ def _task_nsi_bridge(
         buffer_deg = buffer_m / 111_320
 
         logger.info(f"Generating NSI-Base point-in-polygon bridge for AOI {aoi} ...")
-        con = get_connection(memory_limit=mem, threads=threads)
+        # For large AOIs (FL-scale: 8.5M × 8.5M) the single-CTE approach exhausts
+        # available RAM. Run three separate queries with intermediate parquet files
+        # on disk so each pass only holds one result set in memory at a time.
+        # Also disable preserve_insertion_order and cap threads at 2 to reduce
+        # peak memory during spatial joins.
+        nsi_threads = min(threads, 2)
+        con = get_connection(memory_limit=mem, threads=nsi_threads)
+        con.execute("SET preserve_insertion_order=false")
 
-        # Three-pass approach:
-        #   Pass 1 (pip_matches): strict ST_Within — NSI point inside Overture polygon.
-        #   Pass 2 (convex_hull_matches): ST_Within against convex hull of Overture polygon,
-        #     used only for NSI points that failed Pass 1. This catches points that sit in the
-        #     interior void of horseshoe/C-shaped buildings where the literal polygon has a
-        #     concave cavity (e.g., a courtyard), making strict PIP fail.
-        #   Pass 3 (nearest_matches): ST_DWithin within buffer_deg for NSI points that failed
-        #     Passes 1 & 2. Picks the closest Overture building by ST_Distance. Handles points
-        #     that lie just outside the building footprint (e.g., snapped to the wrong side).
-        # All passes keep the best Overture building per NSI point.
-        # A match_method column records which pass produced each row.
-        query = f"""
+        pip_tmp = out_path.parent / f"_pip_tmp_{aoi}.parquet"
+        hull_tmp = out_path.parent / f"_hull_tmp_{aoi}.parquet"
+        nn_tmp = out_path.parent / f"_nn_tmp_{aoi}.parquet"
+
+        # Pass 1: strict point-in-polygon
+        logger.info(f"NSI bridge Pass 1/3: PIP for AOI {aoi} ...")
+        con.execute(f"""
+        COPY (
+            WITH nsi_src AS (
+                SELECT nsi_id, occtype, val_struct, val_cont,
+                       ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{nsi_path}')
+            ),
+            overture_src AS (
+                SELECT overture_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{overture_path}')
+            )
+            SELECT
+                n.nsi_id,
+                o.overture_id,
+                n.occtype                               AS nsi_occtype,
+                n.val_struct                            AS nsi_val_struct,
+                n.val_cont                              AS nsi_val_cont,
+                ST_AsText(n.geometry)                   AS nsi_point_wkt,
+                'point_in_polygon'                      AS match_method
+            FROM nsi_src n
+            JOIN overture_src o
+              ON ST_Within(n.geometry, o.geometry)
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY n.nsi_id
+                ORDER BY ST_Area(o.geometry) ASC
+            ) = 1
+        ) TO '{pip_tmp}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        pip_count = con.execute(f"SELECT COUNT(*) FROM '{pip_tmp}'").fetchone()[0]
+        logger.info(f"NSI bridge Pass 1/3 done: {pip_count:,} PIP matches")
+
+        # Pass 2: convex-hull fallback for unmatched NSI points
+        logger.info(f"NSI bridge Pass 2/3: convex-hull for AOI {aoi} ...")
+        con.execute(f"""
         COPY (
             WITH nsi_src AS (
                 SELECT nsi_id, occtype, val_struct, val_cont,
@@ -267,83 +302,82 @@ def _task_nsi_bridge(
                 SELECT overture_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
                 FROM read_parquet('{overture_path}')
             ),
-            pip_matches AS (
-                SELECT
-                    n.nsi_id,
-                    o.overture_id,
-                    n.occtype                               AS nsi_occtype,
-                    n.val_struct                            AS nsi_val_struct,
-                    n.val_cont                              AS nsi_val_cont,
-                    ST_AsText(n.geometry)                   AS nsi_point_wkt,
-                    'point_in_polygon'                      AS match_method
-                FROM nsi_src n
-                JOIN overture_src o
-                  ON ST_Within(n.geometry, o.geometry)
-                QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY n.nsi_id
-                    ORDER BY ST_Area(o.geometry) ASC
-                ) = 1
-            ),
-            convex_hull_matches AS (
-                SELECT
-                    n.nsi_id,
-                    o.overture_id,
-                    n.occtype                               AS nsi_occtype,
-                    n.val_struct                            AS nsi_val_struct,
-                    n.val_cont                              AS nsi_val_cont,
-                    ST_AsText(n.geometry)                   AS nsi_point_wkt,
-                    'convex_hull'                           AS match_method
-                FROM nsi_src n
-                JOIN overture_src o
-                  ON ST_Within(n.geometry, ST_ConvexHull(o.geometry))
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM pip_matches p WHERE p.nsi_id = n.nsi_id
-                )
-                QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY n.nsi_id
-                    ORDER BY ST_Area(o.geometry) ASC
-                ) = 1
-            ),
-            nearest_matches AS (
-                SELECT
-                    n.nsi_id,
-                    o.overture_id,
-                    n.occtype                               AS nsi_occtype,
-                    n.val_struct                            AS nsi_val_struct,
-                    n.val_cont                              AS nsi_val_cont,
-                    ST_AsText(n.geometry)                   AS nsi_point_wkt,
-                    'nearest_neighbor'                      AS match_method
-                FROM nsi_src n
-                JOIN overture_src o
-                  ON ST_DWithin(n.geometry, o.geometry, {buffer_deg})
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM pip_matches p WHERE p.nsi_id = n.nsi_id
-                )
-                AND NOT EXISTS (
-                    SELECT 1 FROM convex_hull_matches c WHERE c.nsi_id = n.nsi_id
-                )
-                QUALIFY ROW_NUMBER() OVER (
-                    PARTITION BY n.nsi_id
-                    ORDER BY ST_Distance(n.geometry, o.geometry) ASC
-                ) = 1
+            pip_ids AS (
+                SELECT nsi_id FROM read_parquet('{pip_tmp}')
             )
-            SELECT * FROM pip_matches
+            SELECT
+                n.nsi_id,
+                o.overture_id,
+                n.occtype                               AS nsi_occtype,
+                n.val_struct                            AS nsi_val_struct,
+                n.val_cont                              AS nsi_val_cont,
+                ST_AsText(n.geometry)                   AS nsi_point_wkt,
+                'convex_hull'                           AS match_method
+            FROM nsi_src n
+            JOIN overture_src o
+              ON ST_Within(n.geometry, ST_ConvexHull(o.geometry))
+            WHERE NOT EXISTS (SELECT 1 FROM pip_ids p WHERE p.nsi_id = n.nsi_id)
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY n.nsi_id
+                ORDER BY ST_Area(o.geometry) ASC
+            ) = 1
+        ) TO '{hull_tmp}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        hull_count = con.execute(f"SELECT COUNT(*) FROM '{hull_tmp}'").fetchone()[0]
+        logger.info(f"NSI bridge Pass 2/3 done: {hull_count:,} convex-hull matches")
+
+        # Pass 3: nearest-neighbor within buffer for still-unmatched NSI points
+        logger.info(f"NSI bridge Pass 3/3: nearest-neighbor for AOI {aoi} ...")
+        con.execute(f"""
+        COPY (
+            WITH nsi_src AS (
+                SELECT nsi_id, occtype, val_struct, val_cont,
+                       ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{nsi_path}')
+            ),
+            overture_src AS (
+                SELECT overture_id, ST_SetCRS(geometry, 'EPSG:4326') AS geometry
+                FROM read_parquet('{overture_path}')
+            ),
+            matched_ids AS (
+                SELECT nsi_id FROM read_parquet('{pip_tmp}')
+                UNION ALL
+                SELECT nsi_id FROM read_parquet('{hull_tmp}')
+            )
+            SELECT
+                n.nsi_id,
+                o.overture_id,
+                n.occtype                               AS nsi_occtype,
+                n.val_struct                            AS nsi_val_struct,
+                n.val_cont                              AS nsi_val_cont,
+                ST_AsText(n.geometry)                   AS nsi_point_wkt,
+                'nearest_neighbor'                      AS match_method
+            FROM nsi_src n
+            JOIN overture_src o
+              ON ST_DWithin(n.geometry, o.geometry, {buffer_deg})
+            WHERE NOT EXISTS (SELECT 1 FROM matched_ids m WHERE m.nsi_id = n.nsi_id)
+            QUALIFY ROW_NUMBER() OVER (
+                PARTITION BY n.nsi_id
+                ORDER BY ST_Distance(n.geometry, o.geometry) ASC
+            ) = 1
+        ) TO '{nn_tmp}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        nn_count = con.execute(f"SELECT COUNT(*) FROM '{nn_tmp}'").fetchone()[0]
+        logger.info(f"NSI bridge Pass 3/3 done: {nn_count:,} nearest-neighbor matches")
+
+        # Combine all 3 passes into final output
+        con.execute(f"""
+        COPY (
+            SELECT * FROM read_parquet('{pip_tmp}')
             UNION ALL
-            SELECT * FROM convex_hull_matches
+            SELECT * FROM read_parquet('{hull_tmp}')
             UNION ALL
-            SELECT * FROM nearest_matches
+            SELECT * FROM read_parquet('{nn_tmp}')
         ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
-        """
-        con.execute(query)
-        pip_count = con.execute(
-            f"SELECT COUNT(*) FROM '{out_path}' WHERE match_method = 'point_in_polygon'"
-        ).fetchone()[0]
-        hull_count = con.execute(
-            f"SELECT COUNT(*) FROM '{out_path}' WHERE match_method = 'convex_hull'"
-        ).fetchone()[0]
-        nn_count = con.execute(
-            f"SELECT COUNT(*) FROM '{out_path}' WHERE match_method = 'nearest_neighbor'"
-        ).fetchone()[0]
+        """)
+        # Clean up temp files
+        for tmp in (pip_tmp, hull_tmp, nn_tmp):
+            tmp.unlink(missing_ok=True)
         count = pip_count + hull_count + nn_count
 
         # Also write unmatched NSI points — these represent NSI-recorded structures

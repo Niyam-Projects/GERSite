@@ -1,0 +1,20 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "US Virgin Islands",
+    "aoi_id": "us_virgin_islands",
+    "note": "US Virgin Islands territory in the Caribbean."
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-65.100, 17.600],
+        [-64.500, 17.600],
+        [-64.500, 18.500],
+        [-65.100, 18.500],
+        [-65.100, 17.600]
+      ]
+    ]
+  }
+}
