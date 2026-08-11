@@ -1,0 +1,17 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "Hawaii",
+    "aoi_id": "hawaii"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-160.3, 18.9],
+      [-154.8, 18.9],
+      [-154.8, 22.2],
+      [-160.3, 22.2],
+      [-160.3, 18.9]
+    ]]
+  }
+}

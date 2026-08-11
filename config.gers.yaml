@@ -36,6 +36,10 @@ aoi:
     label: "US Virgin Islands"
     bbox: [-65.100, 17.600, -64.500, 18.500]
     geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/us_virgin_islands.geojson"
+  hawaii:
+    label: "Hawaii"
+    bbox: [-160.300, 18.900, -154.800, 22.200]
+    geojson: "/Users/praveenaparimi/Documents/GitHub/GERSite/aoi/hawaii.geojson"
 
 # Local storage root — all bronze/silver/gold paths are relative to this.
 # Swap to an S3 prefix (e.g., s3://your-bucket/gers/) for cloud deployment.
