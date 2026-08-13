@@ -86,6 +86,7 @@ AOI_TO_STATE_CODE = {
     "west_virginia":    "WV",
     "wisconsin":        "WI",
     "wyoming":          "WY",
+    "district_of_columbia": "DC",
 }
 
 
