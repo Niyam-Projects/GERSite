@@ -70,6 +70,12 @@ def compute_iou_sql(
 # ---------------------------------------------------------------------------
 
 
+def bbox_to_polygon(bbox: list) -> shapely.Geometry:
+    """Create a Shapely box from [xmin, ymin, xmax, ymax]."""
+    from shapely.geometry import box as shapely_box
+    return shapely_box(bbox[0], bbox[1], bbox[2], bbox[3])
+
+
 def load_aoi_polygon(geojson_path: str | Path) -> shapely.Geometry:
     """Load an AOI polygon from a GeoJSON file.
 
@@ -84,16 +90,16 @@ def load_aoi_polygon(geojson_path: str | Path) -> shapely.Geometry:
     return shape(feature["geometry"])
 
 
-def aoi_polygon_wkt(geojson_path: str | Path) -> str:
+def aoi_polygon_wkt(geojson_path: str | Path | None, bbox: list | None = None) -> str:
     """Return the AOI polygon as WKT for use in DuckDB ST_Within / ST_Intersects.
 
-    Args:
-        geojson_path: Path to a GeoJSON Feature file.
-
-    Returns:
-        WKT string of the polygon.
+    Falls back to bbox if geojson_path is None or the file doesn't exist.
     """
-    return load_aoi_polygon(geojson_path).wkt
+    if geojson_path and Path(geojson_path).exists():
+        return load_aoi_polygon(geojson_path).wkt
+    if bbox:
+        return bbox_to_polygon(bbox).wkt
+    raise ValueError("Provide either geojson_path or bbox")
 
 
 # ---------------------------------------------------------------------------

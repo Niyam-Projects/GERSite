@@ -194,7 +194,7 @@ def _task_overture(
         )
 
         bbox_filter = aoi_bbox_struct_filter(aoi, CONFIG_PATH)
-        wkt = aoi_polygon_wkt(cfg["aoi"][aoi]["geojson"])
+        wkt = aoi_polygon_wkt(cfg["aoi"][aoi].get("geojson"), cfg["aoi"][aoi].get("bbox"))
 
         con = get_connection(memory_limit=mem, threads=threads)
         con.execute(f"SET s3_region = '{region}'")
@@ -291,7 +291,7 @@ def _task_overture_bridge(
         )
 
         bbox_filter = aoi_bbox_struct_filter(aoi, CONFIG_PATH)
-        wkt = aoi_polygon_wkt(cfg["aoi"][aoi]["geojson"])
+        wkt = aoi_polygon_wkt(cfg["aoi"][aoi].get("geojson"), cfg["aoi"][aoi].get("bbox"))
 
         con = get_connection(memory_limit=mem, threads=threads)
         con.execute(f"SET s3_region = '{region}'")
@@ -374,7 +374,7 @@ def _task_fema(
         out_file = out_dir / "structures.parquet"
 
         xmin, ymin, xmax, ymax = aoi_bbox(aoi, CONFIG_PATH)
-        aoi_polygon = shapely_wkt.loads(aoi_polygon_wkt(cfg["aoi"][aoi]["geojson"]))
+        aoi_polygon = shapely_wkt.loads(aoi_polygon_wkt(cfg["aoi"][aoi].get("geojson"), cfg["aoi"][aoi].get("bbox")))
 
         # ── Scrape the FEMA GDB index for current per-state S3 URLs ──────────
         # URL format: .../USA_Structures/{StateName}/Deliverable{YYYYMMDD}{ST}.zip
@@ -559,7 +559,7 @@ def _task_nsi(
         out_file = out_dir / "structures.parquet"
 
         xmin, ymin, xmax, ymax = aoi_bbox(aoi, CONFIG_PATH)
-        aoi_polygon = shapely_wkt.loads(aoi_polygon_wkt(cfg["aoi"][aoi]["geojson"]))
+        aoi_polygon = shapely_wkt.loads(aoi_polygon_wkt(cfg["aoi"][aoi].get("geojson"), cfg["aoi"][aoi].get("bbox")))
 
         # ── Find which US states/territories the AOI overlaps ─────────────────
         tiger_url = (
